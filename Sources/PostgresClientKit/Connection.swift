@@ -18,14 +18,12 @@
 //
 
 import Foundation
-import Socket
-import SSLService
+import NIO
 
 /// A connection to a Postgres server.
 ///
-/// The `ConnectionConfiguration` used to create a `Connection` specifies the hostname and port
-/// number of the Postgres server, the username and database to use, and other characteristics
-/// of the connection.
+/// Connections are created using a `ConnectionFactory`, typically using the provided
+/// `DefaultConnectionFactory` implementation.
 ///
 /// Connections are used to perform SQL statements.  To perform a SQL statement:
 ///
@@ -80,84 +78,60 @@ public class Connection: CustomStringConvertible {
     // MARK: Connection lifecycle
     //
     
-    /// Creates a `Connection`.
-    ///
-    /// - Parameters:
-    ///   - configuration: the configuration for the `Connection`
-    ///   - delegate: an optional delegate for the `Connection`
-    /// - Throws: `PostgresError` if the operation fails
-    public init(configuration: ConnectionConfiguration,
-                delegate: ConnectionDelegate? = nil) throws {
-        
+    internal init(
+        channel: Channel,
+        ssl: Bool,
+        sslEnabler: (Channel) async throws -> Void,
+        database: String,
+        applicationName: String,
+        user: String,
+        credential: Credential,
+        delegate: ConnectionDelegate?
+    ) async throws {
         var success = false
-        
-        self.delegate = delegate
-        self.socketTimeout = configuration.socketTimeout
-        
-        do {
-            socket = try Socket.create()
-            log(.finer, "Created socket")
-        } catch {
-            Postgres.logger.severe("Unable to create socket: \(error)")
-            throw PostgresError.socketError(cause: error)
-        }
 
+        self.channel = channel
+        self.delegate = delegate
+        
         defer {
             if !success {
-                log(.finer, "Closing socket")
-                socket.close()
+                log(.finer, "Closing channel")
+                channel.close(mode: .all, promise: nil)
             }
         }
         
-        let host = configuration.host
-        let port = configuration.port
-        let socketTimeout = configuration.socketTimeout
-        let socketTimeoutMillis = UInt((socketTimeout < 0) ? 0 : (1000 * socketTimeout))
-
-        do {
-            log(.fine, "Opening connection to port \(port) on host \(host)")
-            try socket.connect(to: host, port: Int32(port), timeout: socketTimeoutMillis)
-            try socket.setReadTimeout(value: socketTimeoutMillis)
-            try socket.setWriteTimeout(value: socketTimeoutMillis)
-        } catch {
-            log(.severe, "Unable to connect socket: \(error)")
-            throw PostgresError.socketError(cause: error)
-        }
-        
-        if configuration.ssl {
+        if ssl {
             log(.finer, "Requesting SSL/TLS encryption")
 
             let sslRequest = SSLRequest()
-            try sendRequest(sslRequest)
-            let sslCode = try readASCIICharacter()
-            
+            try await sendRequest(sslRequest)
+            let sslCode = try await readASCIICharacter()
+
             guard sslCode == "S" else {
                 log(.severe, "SSL/TLS not enabled on Postgres server")
                 throw PostgresError.sslNotSupported
             }
-            
-            // The read buffer should be fully consumed at this point, so that the next byte read
-            // will have passed through SSL/TLS decryption.  If this is not the case, there must
-            // either be a server protocol error or a man-in-the-middle attack.
-            try verifyReadBufferFullyConsumed()
-            
+
             do {
-                let sslConfig = configuration.sslServiceConfiguration
-                let sslService = try SSLService(usingConfiguration: sslConfig)!
-                socket.delegate = sslService
-                try sslService.initialize(asServer: false)
-                try sslService.onConnect(socket: socket)
+                try await sslEnabler(channel)
             } catch {
                 log(.severe, "Unable to establish SSL/TLS encryption: \(error)")
                 throw PostgresError.sslError(cause: error)
             }
-            
+
+            // The read buffer should be fully consumed at this point, so that the next byte read
+            // will have passed through SSL/TLS decryption.  If this is not the case, there must
+            // either be a server protocol error or a man-in-the-middle attack.
+            try verifyReadBufferFullyConsumed()
+
+            // Perform a zero byte write to detect SSL handshake failures.  This would happen on
+            // the next readData or writeData call, but doing it at this point helps make the log
+            // messages less confusing.
+            try await writeData(Data(), buffer: false)
+            lastSocketOperation = .read // squelch the "consecutive writes" warning
+
             log(.fine, "Successfully negotiated SSL/TLS encryption")
         }
-        
-        let user = configuration.user
-        let database = configuration.database
-        let applicationName = configuration.applicationName
         
         log(.fine, "Connecting to database \(database) as user \(user)")
         
@@ -165,14 +139,14 @@ public class Connection: CustomStringConvertible {
                                             database: database,
                                             applicationName: applicationName)
         
-        try sendRequest(startupRequest)
+        try await sendRequest(startupRequest)
         
         var authenticationRequestSent = false
         var scramSHA256Authenticator: SCRAMSHA256Authenticator? = nil
         
         authentication:
         while true {
-            let authenticationResponse = try receiveResponse(type: AuthenticationResponse.self)
+            let authenticationResponse = try await receiveResponse(type: AuthenticationResponse.self)
             
             switch authenticationResponse {
                 
@@ -182,18 +156,18 @@ public class Connection: CustomStringConvertible {
                 
             case is AuthenticationCleartextPasswordResponse:
                 
-                guard case let .cleartextPassword(password) = configuration.credential else {
+                guard case let .cleartextPassword(password) = credential else {
                     log(.warning, "Cleartext password credential required to authenticate")
                     throw PostgresError.cleartextPasswordCredentialRequired
                 }
                 
                 let passwordMessageRequest = PasswordMessageRequest(password: password)
-                try sendRequest(passwordMessageRequest)
+                try await sendRequest(passwordMessageRequest)
                 authenticationRequestSent = true
                 
             case let response as AuthenticationMD5PasswordResponse:
                 
-                guard case let .md5Password(password) = configuration.credential else {
+                guard case let .md5Password(password) = credential else {
                     log(.warning, "MD5 password credential required to authenticate")
                     throw PostgresError.md5PasswordCredentialRequired
                 }
@@ -208,12 +182,12 @@ public class Connection: CustomStringConvertible {
                 let saltedHash = Crypto.md5(data: salted).hexEncodedString()
                 
                 let passwordMessageRequest = PasswordMessageRequest(password: "md5" + saltedHash)
-                try sendRequest(passwordMessageRequest)
+                try await sendRequest(passwordMessageRequest)
                 authenticationRequestSent = true
 
             case let response as AuthenticationSASLResponse:
                 
-                guard case let .scramSHA256(password) = configuration.credential else {
+                guard case let .scramSHA256(password) = credential else {
                     log(.warning, "SCRAM-SHA-256 credential required to authenticate")
                     throw PostgresError.scramSHA256CredentialRequired
                 }
@@ -237,7 +211,7 @@ public class Connection: CustomStringConvertible {
                     mechanism: "SCRAM-SHA-256",
                     clientFirstMessage: clientFirstMessage)
                 
-                try sendRequest(saslInitialRequest)
+                try await sendRequest(saslInitialRequest)
                 authenticationRequestSent = true
                 
             case let response as AuthenticationSASLContinueResponse:
@@ -253,7 +227,7 @@ public class Connection: CustomStringConvertible {
                 let clientFinalMessage = try scramSHA256Authenticator!.prepareClientFinalMessage()
                 
                 let saslRequest = SASLRequest(clientFinalMessage: clientFinalMessage)
-                try sendRequest(saslRequest)
+                try await sendRequest(saslRequest)
                 
             case let response as AuthenticationSASLFinalResponse:
                 
@@ -271,10 +245,10 @@ public class Connection: CustomStringConvertible {
             }
         }
         
-        try receiveResponse(type: ReadyForQueryResponse.self)
+        try await receiveResponse(type: ReadyForQueryResponse.self)
 
         if !authenticationRequestSent {
-            guard case .trust = configuration.credential else {
+            guard case .trust = credential else {
                 // Postgres allowed trust authentication, yet a cleartextPassword,
                 // md5Password, or scramSHA256 credential was supplied.  Throw to
                 // alert of a possible Postgres misconfiguration.
@@ -315,22 +289,21 @@ public class Connection: CustomStringConvertible {
     
     /// Whether this `Connection` is closed.
     ///
-    /// To close a `Connection`, call `close()`.  A `Connection` is also closed if an unrecoverable
-    /// error occurs (for example, if the Postgres server closes the network socket).
-    public var isClosed: Bool {
-        return !socket.isConnected
-    }
-    
+    /// To close a `Connection`, call `close()` or `closeAbruptly()`.  A `Connection` is also
+    /// closed if an unrecoverable error occurs (for example, if the Postgres server closes
+    /// the network socket).
+    public private(set) var isClosed = false
+
     /// Closes this `Connection`.
     ///
     /// Has no effect if this `Connection` is already closed.
-    public func close() {
+    public func close() async {
         if !isClosed {
             log(.fine, "Closing connection")
             cursorState = .closed
             
             let terminateRequest = TerminateRequest()
-            try? sendRequest(terminateRequest) // consumes any Error
+            try? await sendRequest(terminateRequest) // consumes any Error
             
             closeAbruptly()
         }
@@ -344,9 +317,11 @@ public class Connection: CustomStringConvertible {
     /// Use this method to force a connection to immediately close, even if another thread is
     /// concurrently operating against the connection.
     public func closeAbruptly() {
-        log(.finer, "Closing socket")
-        socket.close()
-        log(.fine, "Connection closed")
+        if !isClosed {
+            log(.finer, "Closing channel")
+            isClosed = true
+            channel.close(mode: .all, promise: nil)
+        }
     }
     
     /// Verifies this `Connection` is not closed.
@@ -361,26 +336,30 @@ public class Connection: CustomStringConvertible {
     
     /// Invokes `close()`.
     deinit {
-        close()
+        closeAbruptly()
+    }
+    
+    private func resyncOrCloseConnection() {
+        UnsafeTask { await self.resyncOrCloseConnection() }.get()
     }
     
     /// Attempts to resynchronize this `Connection`, closing it if resynchronization fails.
     ///
     /// The Postgres server requires resynchronization to be performed after reporting an
     /// `ErrorResponse`.
-    private func resyncOrCloseConnection() {
+    private func resyncOrCloseConnection() async {
         if !isClosed {
             cursorState = .closed
             
             do {
                 lastSocketOperation = .read // squelch the "consecutive writes" warning
                 let syncRequest = SyncRequest()
-                try sendRequest(syncRequest)
-                try receiveResponse(type: ReadyForQueryResponse.self)
+                try await sendRequest(syncRequest)
+                try await receiveResponse(type: ReadyForQueryResponse.self)
             } catch {
                 log(.warning, "Closing connection due to unrecoverable error: \(error)")
                 lastSocketOperation = .read // squelch the "consecutive writes" warning
-                close()
+                await close()
             }
         }
     }
@@ -842,25 +821,37 @@ public class Connection: CustomStringConvertible {
     //
     // MARK: Request processing
     //
-    
+
     private func sendRequest(_ request: Request, buffer: Bool = false) throws {
+        try ThrowingUnsafeTask {
+            try await self.sendRequest(request, buffer: buffer)
+        }.get()
+    }
+    
+    private func sendRequest(_ request: Request, buffer: Bool = false) async throws {
         log(.finer, "Sending \(request)")
-        try writeData(request.data(), buffer: buffer)
+        try await writeData(request.data(), buffer: buffer)
     }
     
     
     //
     // MARK: Response processing
     //
-    
+
     @discardableResult private func receiveResponse<T: Response>(type: T.Type? = nil) throws -> T {
+        return try ThrowingUnsafeTask {
+            try await self.receiveResponse(type: type)
+        }.get()
+    }
+
+    @discardableResult private func receiveResponse<T: Response>(type: T.Type? = nil) async throws -> T {
         
         while true {
             
-            let responseType = try readASCIICharacter()
+            let responseType = try await readASCIICharacter()
             
             // The response length includes itself (4 bytes) but excludes the response type (1 byte).
-            let responseLength = try readUInt32()
+            let responseLength = try await readUInt32()
             
             let responseBody = ResponseBody(responseType: responseType,
                                             responseLength: Int(responseLength),
@@ -870,21 +861,21 @@ public class Connection: CustomStringConvertible {
             
             switch responseType {
                 
-            case "1": response = try ParseCompleteResponse(responseBody: responseBody)
-            case "2": response = try BindCompleteResponse(responseBody: responseBody)
-            case "3": response = try CloseCompleteResponse(responseBody: responseBody)
-            case "A": response = try NotificationResponse(responseBody: responseBody)
-            case "C": response = try CommandCompleteResponse(responseBody: responseBody)
-            case "D": response = try DataRowResponse(responseBody: responseBody)
-            case "E": response = try ErrorResponse(responseBody: responseBody)
-            case "I": response = try EmptyQueryResponse(responseBody: responseBody)
-            case "K": response = try BackendKeyDataResponse(responseBody: responseBody)
-            case "N": response = try NoticeResponse(responseBody: responseBody)
-            case "R": response = try AuthenticationResponse.parse(responseBody: responseBody)
-            case "S": response = try ParameterStatusResponse(responseBody: responseBody)
-            case "T": response = try RowDescriptionResponse(responseBody: responseBody)
-            case "Z": response = try ReadyForQueryResponse(responseBody: responseBody)
-            case "n": response = try NoDataResponse(responseBody: responseBody)
+            case "1": response = try await ParseCompleteResponse(responseBody: responseBody)
+            case "2": response = try await BindCompleteResponse(responseBody: responseBody)
+            case "3": response = try await CloseCompleteResponse(responseBody: responseBody)
+            case "A": response = try await NotificationResponse(responseBody: responseBody)
+            case "C": response = try await CommandCompleteResponse(responseBody: responseBody)
+            case "D": response = try await DataRowResponse(responseBody: responseBody)
+            case "E": response = try await ErrorResponse(responseBody: responseBody)
+            case "I": response = try await EmptyQueryResponse(responseBody: responseBody)
+            case "K": response = try await BackendKeyDataResponse(responseBody: responseBody)
+            case "N": response = try await NoticeResponse(responseBody: responseBody)
+            case "R": response = try await AuthenticationResponse.parse(responseBody: responseBody)
+            case "S": response = try await ParameterStatusResponse(responseBody: responseBody)
+            case "T": response = try await RowDescriptionResponse(responseBody: responseBody)
+            case "Z": response = try await ReadyForQueryResponse(responseBody: responseBody)
+            case "n": response = try await NoDataResponse(responseBody: responseBody)
 
             default:
                 log(.warning, "Unrecognized response type: \(responseType)")
@@ -921,8 +912,8 @@ public class Connection: CustomStringConvertible {
                     didReceiveParameterStatus: (name: parameterStatusResponse.name,
                                                 value: parameterStatusResponse.value))
                 
-                try Parameter.checkParameterStatusResponse(parameterStatusResponse,
-                                                           connection: self)
+                try await Parameter.checkParameterStatusResponse(parameterStatusResponse,
+                                                                 connection: self)
                 
             case is T:
                 
@@ -952,7 +943,7 @@ public class Connection: CustomStringConvertible {
     
     /// The body of a response (everything after the bytes indicating the response length).
     internal class ResponseBody {
-        
+
         /// Creates a `ResponseBody`.
         ///
         /// - Parameters:
@@ -960,77 +951,77 @@ public class Connection: CustomStringConvertible {
         ///   - responseLength: the response length, in bytes
         ///   - connection: the `Connection`
         fileprivate init(responseType: Character, responseLength: Int, connection: Connection) {
-            
+
             self.responseType = responseType
-            
+
             // responseLength includes the 4-byte response length
             self.bytesRemaining = responseLength - 4
-            
+
             self.connection = connection
         }
-        
+
         internal let responseType: Character
         internal private(set) var bytesRemaining: Int
         internal let connection: Connection
-        
+
         /// Reads an unsigned 8-bit integer without consuming it.
         ///
         /// - Returns: the value
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func peekUInt8() throws -> UInt8 {
-            
+        @discardableResult internal func peekUInt8() async throws -> UInt8 {
+
             if bytesRemaining == 0 {
                 connection.log(.warning, "Response too short")
                 throw PostgresError.serverError(description: "response too short")
             }
-            
-            let byte = try connection.peekUInt8()
-            
+
+            let byte = try await connection.peekUInt8()
+
             return byte
         }
-        
+
         /// Reads an unsigned 8-bit integer.
         ///
         /// - Returns: the value
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readUInt8() throws -> UInt8 {
-            
+        @discardableResult internal func readUInt8() async throws -> UInt8 {
+
             if bytesRemaining == 0 {
                 connection.log(.warning, "Response too short")
                 throw PostgresError.serverError(description: "response too short")
             }
-            
-            let byte = try connection.readUInt8()
+
+            let byte = try await connection.readUInt8()
             bytesRemaining -= 1
-            
+
             return byte
         }
-        
+
         /// Reads an unsigned big-endian 16-bit integer.
         ///
         /// - Returns: the value
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readUInt16() throws -> UInt16 {
-            
-            let value = try
+        @discardableResult internal func readUInt16() async throws -> UInt16 {
+
+            let value = try await
                 UInt16(readUInt8()) << 8 +
                 UInt16(readUInt8())
-            
+
             return value
         }
-        
+
         /// Reads an unsigned big-endian 32-bit integer.
         ///
         /// - Returns: the value
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readUInt32() throws -> UInt32 {
-            
-            let value = try
+        @discardableResult internal func readUInt32() async throws -> UInt32 {
+
+            let value = try await
                 UInt32(readUInt8()) << 24 +
                 UInt32(readUInt8()) << 16 +
                 UInt32(readUInt8()) << 8 +
                 UInt32(readUInt8())
-            
+
             return value
         }
 
@@ -1039,29 +1030,29 @@ public class Connection: CustomStringConvertible {
         /// - Parameter count: the number of bytes to read
         /// - Returns: the data
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readData(count: Int) throws -> Data {
-            
+        @discardableResult internal func readData(count: Int) async throws -> Data {
+
             if bytesRemaining < count {
                 connection.log(.warning, "Response too short")
                 throw PostgresError.serverError(description: "response too short")
             }
-            
-            let data = try connection.readData(count: count)
+
+            let data = try await connection.readData(count: count)
             bytesRemaining -= data.count
-            
+
             assert(data.count == count)
-            
+
             return data
         }
-        
+
         /// Reads a single ASCII character.
         ///
         /// - Returns: the character
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readASCIICharacter() throws -> Character {
-            
-            let c = try Character(Unicode.Scalar(readUInt8()))
-            
+        @discardableResult internal func readASCIICharacter() async throws -> Character {
+
+            let c = try await Character(Unicode.Scalar(readUInt8()))
+
             return c
         }
 
@@ -1069,45 +1060,45 @@ public class Connection: CustomStringConvertible {
         ///
         /// - Returns: the string
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readUTF8String() throws -> String {
-            
+        @discardableResult internal func readUTF8String() async throws -> String {
+
             var bs = [UInt8]()
-            
+
             while true {
-                let b = try readUInt8()
-                
+                let b = try await readUInt8()
+
                 if b == 0 {
                     break
                 }
-                
+
                 bs.append(b)
             }
-            
+
             guard let s = String(data: Data(bs), encoding: .utf8) else {
                 connection.log(.warning, "Response contained invalid UTF8 string")
                 throw PostgresError.serverError(description: "response contained invalid UTF8 string")
             }
-            
+
             return s
         }
-        
+
         /// Reads a UTF8 string.
         ///
         /// - Parameter byteCount: the length of the string, in bytes
         /// - Returns: the string
         /// - Throws: `PostgresError` if the operation fails
-        @discardableResult internal func readUTF8String(byteCount: Int) throws -> String {
-            
-            let data = try readData(count: byteCount)
-            
+        @discardableResult internal func readUTF8String(byteCount: Int) async throws -> String {
+
+            let data = try await readData(count: byteCount)
+
             guard let s = String(data: data, encoding: .utf8) else {
                 connection.log(.warning, "Response contained invalid UTF8 string")
                 throw PostgresError.serverError(description: "response contained invalid UTF8 string")
             }
-            
+
             return s
         }
-        
+
         /// Verifies the response body has been fully consumed.
         ///
         /// - Throws: `PostgresError.serverError` if not fully consumed
@@ -1118,17 +1109,14 @@ public class Connection: CustomStringConvertible {
             }
         }
     }
-    
+
     
     //
     // MARK: Socket
     //
     
-    /// The underlying socket to the Postgres server.
-    private let socket: Socket
-    
-    /// The timeout for socket operations, in seconds, or 0 for no timeout.
-    private let socketTimeout: Int
+    /// The underlying SwiftNIO channel to the Postgres server.
+    private let channel: Channel
 
     /// The type of operation most recently performed on the socket.
     ///
@@ -1137,106 +1125,107 @@ public class Connection: CustomStringConvertible {
     ///
     /// See https://stackoverflow.com/questions/32274907.
     private var lastSocketOperation = LastSocketOperation.created
-    
+
     private enum LastSocketOperation {
         case created
         case read
         case write
     }
-    
+
     /// A buffer of data read from Postgres but not yet consumed.
     private var readBuffer = Data()
-    
+
     /// The index of the next byte to consume from the read buffer.
     private var readBufferPosition = 0
-    
+
     /// Reads an unsigned 8-bit integer from Postgres without consuming it.
     ///
     /// - Returns: the value
     /// - Throws: `PostgresError` if the operation fails
-    private func peekUInt8() throws -> UInt8 {
-        
+    private func peekUInt8() async throws -> UInt8 {
+
         if readBufferPosition == readBuffer.count {
-            try refillReadBuffer()
+            try await refillReadBuffer()
         }
-        
+
         let byte = readBuffer[readBufferPosition]
-        
+
         return byte
     }
-    
+
     /// Reads an unsigned 8-bit integer from Postgres.
     ///
     /// - Returns: the value
     /// - Throws: `PostgresError` if the operation fails
-    private func readUInt8() throws -> UInt8 {
-        
-        let byte = try peekUInt8()
+    private func readUInt8() async throws -> UInt8 {
+
+        let byte = try await peekUInt8()
         readBufferPosition += 1
-        
+
         return byte
     }
-    
+
     /// Reads an unsigned big-endian 32-bit integer from Postgres.
     ///
     /// - Returns: the value
     /// - Throws: `PostgresError` if the operation fails
-    private func readUInt32() throws -> UInt32 {
-        
-        let value = try
+    private func readUInt32() async throws -> UInt32 {
+
+        let value = try await
             UInt32(readUInt8()) << 24 +
             UInt32(readUInt8()) << 16 +
             UInt32(readUInt8()) << 8 +
             UInt32(readUInt8())
-        
+
         return value
     }
-    
+
     /// Reads the specified number of bytes from Postgres.
     ///
     /// - Parameter count: the number of bytes to read
     /// - Returns: the data
     /// - Throws: `PostgresError` if the operation fails
-    private func readData(count: Int) throws -> Data {
-        
+    private func readData(count: Int) async throws -> Data {
+
         var data = Data()
-        
+
         while data.count < count {
-            
+
             let fromIndex = readBufferPosition
             let toIndex = min(readBufferPosition + count - data.count, readBuffer.count)
             let chunk = readBuffer[fromIndex..<toIndex]
             data += chunk
             readBufferPosition += chunk.count
-            
+
             if data.count < count {
-                try refillReadBuffer()
+                try await refillReadBuffer()
             }
         }
-        
+
         assert(data.count == count)
-        
+
         return data
     }
-    
+
     /// Reads a single ASCII character from Postgres.
     ///
     /// - Returns: the character
     /// - Throws: `PostgresError` if the operation fails
-    private func readASCIICharacter() throws -> Character {
-        
-        let c = try Character(Unicode.Scalar(readUInt8()))
-        
+    private func readASCIICharacter() async throws -> Character {
+
+        let c = try await Character(Unicode.Scalar(readUInt8()))
+
         return c
     }
-    
+
     private func verifyReadBufferFullyConsumed() throws {
+        // FIXME: also need to check the buffer in AsyncAwaitChannelHandler
         guard readBufferPosition == readBuffer.count else {
             throw PostgresError.serverError(description: "response too long")
         }
     }
-    
-    private func refillReadBuffer() throws {
+
+    private func refillReadBuffer() async throws {
         
         assert(readBufferPosition == readBuffer.count)
         
@@ -1245,33 +1234,23 @@ public class Connection: CustomStringConvertible {
         readBuffer.removeAll()
         readBufferPosition = 0
         
-        var readCount = 0
-        
-        let timeoutInterval = TimeInterval((socketTimeout == 0) ? 30 : socketTimeout)
-        let timeout = Date(timeIntervalSinceNow: timeoutInterval)
-        
-        while readCount == 0 && Date() < timeout && !socket.remoteConnectionClosed {
-            do {
-                readCount = try socket.read(into: &readBuffer)
-                
-                if readCount == 0 {
-                    // Workaround https://github.com/Kitura/BlueSSLService/issues/79.
-                    // This issue results in socket.read(...) returning 0 even though the
-                    // socket is supposedly "blocking".
-                    Thread.sleep(forTimeInterval: 0.01) // 10 ms
-                }
-            } catch {
-                log(.warning, "Error receiving response: \(error)")
-                throw PostgresError.socketError(cause: error)
+        do {
+            while readBuffer.isEmpty {
+                guard var buffer = try await channel.asyncRead() else { break }
+                guard let bytes = buffer.readBytes(length: buffer.readableBytes) else { continue }
+                readBuffer.append(contentsOf: bytes)
             }
+        } catch {
+            log(.warning, "Error receiving response: \(error)")
+            throw PostgresError.socketError(cause: error)
         }
         
-        if readCount == 0 {
+        if readBuffer.isEmpty {
             log(.warning, "Response truncated; no data available")
             throw PostgresError.serverError(description: "no data available from server")
         }
     }
-    
+
     /// A buffer of data to be written to Postgres.
     private var writeBuffer = Data()
     
@@ -1282,7 +1261,7 @@ public class Connection: CustomStringConvertible {
     ///   - data: the data
     ///   - buffer: whether to buffer; if false the data is written immediately
     /// - Throws: if the operation fails
-    func writeData(_ data: Data, buffer: Bool) throws {
+    func writeData(_ data: Data, buffer: Bool) async throws {
         
         writeBuffer.append(data)
         
@@ -1296,7 +1275,7 @@ public class Connection: CustomStringConvertible {
             defer { writeBuffer.removeAll() }
             
             do {
-                try socket.write(from: writeBuffer)
+                try await channel.asyncWrite(channel.allocator.buffer(bytes: writeBuffer))
             } catch {
                 log(.warning, "Error sending request: \(error)")
                 throw PostgresError.socketError(cause: error)

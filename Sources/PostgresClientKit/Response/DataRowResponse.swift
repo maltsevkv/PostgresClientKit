@@ -19,26 +19,26 @@
 
 internal class DataRowResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "D")
         
-        let columnCount = try responseBody.readUInt16()
+        let columnCount = try await responseBody.readUInt16()
         var columns = [PostgresValue]()
         
         for _ in 0..<columnCount {
-            let byteCount = try responseBody.readUInt32()
+            let byteCount = try await responseBody.readUInt32()
             
             let rawValue = (byteCount == UInt32.max) ?
                 nil :
-                try responseBody.readUTF8String(byteCount: Int(byteCount))
+                try await responseBody.readUTF8String(byteCount: Int(byteCount))
             
             columns.append(PostgresValue(rawValue))
         }
         
         self.columns = columns
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let columns: [PostgresValue]

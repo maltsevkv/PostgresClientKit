@@ -23,10 +23,10 @@ import XCTest
 /// Tests roundtripping PostgresValue -> Postgres server data types -> PostgresValue.
 class DataTypeTest: PostgresClientKitTestCase {
     
-    func test() {
+    func test() async {
         
         do {
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            let connection = try await terryConnection()
             
             var text = "DROP TABLE IF EXISTS datatypetest"
             try connection.prepareStatement(text: text).execute()

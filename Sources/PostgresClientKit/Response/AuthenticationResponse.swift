@@ -19,16 +19,16 @@
 
 internal class AuthenticationResponse: Response {
     
-    internal class func parse(responseBody: Connection.ResponseBody) throws
+    internal class func parse(responseBody: Connection.ResponseBody) async throws
         -> AuthenticationResponse {
         
         let connection = responseBody.connection
-        let authenticationType = try responseBody.readUInt32()
+        let authenticationType = try await responseBody.readUInt32()
         
         switch authenticationType {
             
         case 0:
-            return try AuthenticationOKResponse(responseBody: responseBody)
+            return try await AuthenticationOKResponse(responseBody: responseBody)
             
         case 2:
             connection.log(.warning, "Unsupported authentication type: AuthenticationKerberosV5")
@@ -37,10 +37,10 @@ internal class AuthenticationResponse: Response {
                 authenticationType: "AuthenticationKerberosV5")
             
         case 3:
-            return try AuthenticationCleartextPasswordResponse(responseBody: responseBody)
+            return try await AuthenticationCleartextPasswordResponse(responseBody: responseBody)
             
         case 5:
-            return try AuthenticationMD5PasswordResponse(responseBody: responseBody)
+            return try await AuthenticationMD5PasswordResponse(responseBody: responseBody)
             
         case 6:
             connection.log(.warning, "Unsupported authentication type: AuthenticationSCMCredential")
@@ -67,13 +67,13 @@ internal class AuthenticationResponse: Response {
                 authenticationType: "AuthenticationSSPI")
             
         case 10:
-            return try AuthenticationSASLResponse(responseBody: responseBody)
+            return try await AuthenticationSASLResponse(responseBody: responseBody)
 
         case 11:
-            return try AuthenticationSASLContinueResponse(responseBody: responseBody)
+            return try await AuthenticationSASLContinueResponse(responseBody: responseBody)
             
         case 12:
-            return try AuthenticationSASLFinalResponse(responseBody: responseBody)
+            return try await AuthenticationSASLFinalResponse(responseBody: responseBody)
             
         default:
             connection.log(.warning, "Unsupported authentication type: \(authenticationType)")

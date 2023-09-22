@@ -23,7 +23,7 @@ import XCTest
 /// Tests various DML statements.
 class SQLStatementTest: PostgresClientKitTestCase {
     
-    func testCRUD() {
+    func testCRUD() async {
         
         func time(_ name: String, operation: () throws -> Void) throws {
             let start = Date()
@@ -33,8 +33,8 @@ class SQLStatementTest: PostgresClientKitTestCase {
         }
         
         do {
-            try createWeatherTable()
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            try await createWeatherTable()
+            let connection = try await terryConnection()
 
             // Create 1000 days of random weather records for San Jose.
             var weatherHistory = [[PostgresValueConvertible]]()
@@ -190,11 +190,11 @@ class SQLStatementTest: PostgresClientKitTestCase {
         }
     }
     
-    func testSQLCursor() {
+    func testSQLCursor() async {
         
         do {
-            try createWeatherTable()
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            try await createWeatherTable()
+            let connection = try await terryConnection()
             
             var text = "DECLARE wc CURSOR WITH HOLD FOR SELECT * FROM weather"
             var statement = try connection.prepareStatement(text: text)
@@ -228,11 +228,11 @@ class SQLStatementTest: PostgresClientKitTestCase {
         }
     }
 
-    func testResultMetadata() {
+    func testResultMetadata() async {
         
         do {
-            try createWeatherTable()
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            try await createWeatherTable()
+            let connection = try await terryConnection()
             
             func checkResultMetadata(columns: [ColumnMetadata]) {
                 

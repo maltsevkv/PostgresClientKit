@@ -18,6 +18,8 @@
 //
 
 import PostgresClientKit
+import NIO
+import NIOSSL
 import XCTest
 
 /// A base class for testing PostgresClientKit.
@@ -79,84 +81,129 @@ class PostgresClientKitTestCase: XCTestCase {
     //
     // MARK: Connections
     //
-        
-    /// Creates a `ConnectionConfiguration` for Terry, authenticating by `Credential.trust`.
+    
+    /// The SwiftNIO `EventLoopGroup` used for testing.
+    private static let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    
+    // An SSLContext that disables certificate verification to allow self-signed certificates.
+    private static let sslContext = try! NIOSSLContext(
+        configuration: .makeClientConfiguration(certificateVerification: .none))
+    
+    /// Creates a default `ConnectionFactory`.
     ///
-    /// - Parameter ssl: whether to use SSL/TLS
-    /// - Returns: the configuration
-    func terryConnectionConfiguration(ssl: Bool = true) -> ConnectionConfiguration {
+    /// The returned `ConnectionFactory` can be further customized by the caller.  However,
+    /// because `ConnectionFactory` is a class, this method should be called each time a
+    /// distinct `ConnectionFactory` is required.
+    /// - Returns: the `ConnnectionFactory`
+    static func createConnectionFactory() throws -> DefaultConnectionFactory {
+        let environment = TestEnvironment.current
+        let factory = try! DefaultConnectionFactory(eventLoopGroup: Self.eventLoopGroup)
+        factory.host = environment.postgresHost
+        factory.port = environment.postgresPort
+        factory.ssl = true // the default
+        factory.database = environment.postgresDatabase
+        factory.sslContext = Self.sslContext
+        factory.sslServerName = environment.postgresSSLServerName
+        return factory
+    }
+    
+    /// A `ConnectionFactory` that creates SSL/TLS-encrypted connections.
+    static let encryptedConnectionFactory: ConnectionFactory = {
+        let factory = try! createConnectionFactory()
+        factory.ssl = true // the default
+        return factory
+    }()
+    
+    /// A `ConnectionFactory` that creates unencrypted connections.
+    static let unencryptedConnectionFactory: ConnectionFactory = {
+        let factory = try! createConnectionFactory()
+        factory.ssl = false
+        return factory
+    }()
+    
+    /// Creates a connection for Terry, authenticating by `Credential.trust`.
+    ///
+    /// - Parameters:
+    ///   - ssl: whether to encrypt the connection using SSL/TLS
+    ///   - delegate: the delegate for the connection, or nil for none
+    ///
+    /// - Returns: the connection
+    func terryConnection(ssl: Bool = true,
+                         delegate: ConnectionDelegate? = nil) async throws -> Connection {
         
         let environment = TestEnvironment.current
         
-        var configuration = ConnectionConfiguration()
-        configuration.host = environment.postgresHost
-        configuration.port = environment.postgresPort
-        configuration.ssl = ssl
-        configuration.database = environment.postgresDatabase
-        configuration.user = environment.terryUsername
-        configuration.credential = .trust
+        let connectionFactory = ssl ?
+            Self.encryptedConnectionFactory : Self.unencryptedConnectionFactory
         
-        return configuration
+        return try await connectionFactory.connect(user: environment.terryUsername,
+                                                   credential: .trust,
+                                                   delegate: delegate)
     }
-    
-    /// Creates a `ConnectionConfiguration` for Charlie, authenticating by
-    /// `Credential.cleartextPassword`.
+
+    /// Creates a connection for Charlie, authenticating by `Credential.cleartextPassword`.
     ///
-    /// - Parameter ssl: whether to use SSL/TLS
-    /// - Returns: the configuration
-    func charlieConnectionConfiguration(ssl: Bool = true) -> ConnectionConfiguration {
+    /// - Parameters:
+    ///   - ssl: whether to encrypt the connection using SSL/TLS
+    ///   - delegate: the delegate for the connection, or nil for none
+    ///
+    /// - Returns: the connection
+    func charlieConnection(ssl: Bool = true,
+                           delegate: ConnectionDelegate? = nil) async throws -> Connection {
         
         let environment = TestEnvironment.current
         
-        var configuration = ConnectionConfiguration()
-        configuration.host = environment.postgresHost
-        configuration.port = environment.postgresPort
-        configuration.ssl = ssl
-        configuration.database = environment.postgresDatabase
-        configuration.user = environment.charlieUsername
-        configuration.credential = .cleartextPassword(password: environment.charliePassword)
+        let connectionFactory = ssl ?
+            Self.encryptedConnectionFactory : Self.unencryptedConnectionFactory
         
-        return configuration
+        return try await connectionFactory.connect(
+            user: environment.charlieUsername,
+            credential: .cleartextPassword(password: environment.charliePassword),
+            delegate: delegate)
     }
     
-    /// Creates a `ConnectionConfiguration` for Mary, authenticating by `Credential.md5Password`.
+    /// Creates a connection for Mary, authenticating by `Credential.md5Password`.
     ///
-    /// - Parameter ssl: whether to use SSL/TLS
-    /// - Returns: the configuration
-    func maryConnectionConfiguration(ssl: Bool = true) -> ConnectionConfiguration {
+    /// - Parameters:
+    ///   - ssl: whether to encrypt the connection using SSL/TLS
+    ///   - delegate: the delegate for the connection, or nil for none
+    ///
+    /// - Returns: the connection
+    func maryConnection(ssl: Bool = true,
+                           delegate: ConnectionDelegate? = nil) async throws -> Connection {
         
         let environment = TestEnvironment.current
         
-        var configuration = ConnectionConfiguration()
-        configuration.host = environment.postgresHost
-        configuration.port = environment.postgresPort
-        configuration.ssl = ssl
-        configuration.database = environment.postgresDatabase
-        configuration.user = environment.maryUsername
-        configuration.credential = .md5Password(password: environment.maryPassword)
+        let connectionFactory = ssl ?
+            Self.encryptedConnectionFactory : Self.unencryptedConnectionFactory
         
-        return configuration
+        return try await connectionFactory.connect(
+            user: environment.maryUsername,
+            credential: .md5Password(password: environment.maryPassword),
+            delegate: delegate)
     }
     
-    /// Creates a `ConnectionConfiguration` for Sally, authenticating by `Credential.scramSHA256`.
+    /// Creates a connection for Sally, authenticating by `Credential.scramSHA256`.
     ///
-    /// - Parameter ssl: whether to use SSL/TLS
-    /// - Returns: the configuration
-    func sallyConnectionConfiguration(ssl: Bool = true) -> ConnectionConfiguration {
+    /// - Parameters:
+    ///   - ssl: whether to encrypt the connection using SSL/TLS
+    ///   - delegate: the delegate for the connection, or nil for none
+    ///
+    /// - Returns: the connection
+    func sallyConnection(ssl: Bool = true,
+                         delegate: ConnectionDelegate? = nil) async throws -> Connection {
         
         let environment = TestEnvironment.current
         
-        var configuration = ConnectionConfiguration()
-        configuration.host = environment.postgresHost
-        configuration.port = environment.postgresPort
-        configuration.ssl = ssl
-        configuration.database = environment.postgresDatabase
-        configuration.user = environment.sallyUsername
-        configuration.credential = .scramSHA256(password: environment.sallyPassword)
+        let connectionFactory = ssl ?
+            Self.encryptedConnectionFactory : Self.unencryptedConnectionFactory
         
-        return configuration
+        return try await connectionFactory.connect(
+            user: environment.sallyUsername,
+            credential: .scramSHA256(password: environment.sallyPassword),
+            delegate: delegate)
     }
-    
+
 
     //
     // MARK: Test data
@@ -167,11 +214,10 @@ class PostgresClientKitTestCase: XCTestCase {
     ///
     /// - SeeAlso: https://www.postgresql.org/docs/12/tutorial-table.html
     /// - SeeAlso: https://www.postgresql.org/docs/12/tutorial-populate.html
-    func createWeatherTable() throws {
+    func createWeatherTable() async throws {
         
-        let configuration = terryConnectionConfiguration()
-        let connection = try Connection(configuration: configuration)
-        defer { connection.close() }
+        let connection = try await terryConnection()
+        defer { connection.closeAbruptly() }
         
         var statement = try connection.prepareStatement(text: "DROP TABLE IF EXISTS weather CASCADE")
         defer { statement.close() }
@@ -200,6 +246,50 @@ class PostgresClientKitTestCase: XCTestCase {
     //
     // MARK: Assertions
     //
+    
+    
+    /// Asserts two values are equal.
+    func XCTAssertEqualAsync<T>(
+        _ expression1: @escaping @autoclosure () async throws -> T,
+        _ expression2: @escaping @autoclosure () async throws -> T,
+        _ message: @escaping @autoclosure () -> String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws where T : Equatable {
+        let value1: T = try await expression1()
+        let value2: T = try await expression2()
+        XCTAssertEqual(value1, value2, message(), file: file, line: line)
+    }
+    
+    /// Asserts that an expression throws an error.
+    func XCTAssertThrowsErrorAsync<T>(
+        _ expression: @autoclosure () async throws -> T,
+        _ message: @autoclosure () -> String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ errorHandler: (_ error: Error) -> Void = { _ in }
+    ) async {
+        do {
+            let value = try await expression()
+            XCTAssertThrowsError(value, message(), file: file, line: line, errorHandler)
+        } catch {
+            XCTAssertThrowsError(try { throw error }(), message(), file: file, line: line, errorHandler)
+        }
+    }
+    
+    /// Asserts that an expression doesn't throw an error.
+    func XCTAssertNoThrowAsync<T>(
+        _ expression: @autoclosure () async throws -> T,
+        _ message: @autoclosure () -> String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+        } catch {
+            XCTAssertNoThrow(try { throw error }(), message(), file: file, line: line)
+        }
+    }
     
     /// Asserts two values are either both `nil` or both non-`nil`.
     func XCTAssertBothNilOrBothNotNil<T>(_ value1: T?, _ value2: T?,
@@ -341,7 +431,7 @@ class PostgresClientKitTestCase: XCTestCase {
     
     
     //
-    // MARK: Expectations
+    // MARK: Expectations // FIXME: revisit async testing
     //
     
     /// Sets an expectation.
@@ -353,8 +443,8 @@ class PostgresClientKitTestCase: XCTestCase {
     }
     
     /// Waits up to 2.0 seconds for all expectations to be fulfilled.
-    func waitForExpectations() {
-        waitForExpectations(timeout: 2.0)
+    func waitForExpectations(_ expectations: [XCTestExpectation]) async {
+        await fulfillment(of: expectations, timeout: 2.0)
     }
 }
 

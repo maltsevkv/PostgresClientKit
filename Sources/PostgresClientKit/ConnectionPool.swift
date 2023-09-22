@@ -29,9 +29,9 @@ import Foundation
 /// connections in the pool, how long a request for a connection will wait for a connection to
 /// become available, and other characteristics of the pool.
 ///
-/// All connections in a `ConnectionPool` are created from the same `ConnectionConfiguration`.
-/// They also have the same `ConnectionDelegate` (if a delegate is specified).  Consequently
-/// any connection in a pool is interchangeable with any other.
+/// All connections in a `ConnectionPool` are created using the same `ConnectionFactory`, user
+/// name, and `Credential`.  They also have the same `ConnectionDelegate` (if a delegate is
+/// specified).  Consequently any connection in a pool is interchangeable with any other.
 ///
 /// Use `ConnectionPool.acquireConnection(completionHandler:)` to request a connection from a
 /// `ConnectionPool`.  This method is non-blocking: its completion handler is asynchronously
@@ -54,7 +54,7 @@ import Foundation
 /// The `ConnectionPool` class is threadsafe: multiple threads may concurrently operate against a
 /// `ConnectionPool` instance.  Connections acquired from the pool are subject to the threadsafety
 /// constraints described by the API documentation for `Connection`.
-public class ConnectionPool {
+public class ConnectionPool { // FIXME: ConnectionPool needs a complete overhaul
     
     //
     // Public API
@@ -66,14 +66,20 @@ public class ConnectionPool {
     ///
     /// - Parameters:
     ///   - connectionPoolConfiguration: the configuration for the `ConnectionPool`
-    ///   - connectionConfiguration: the configuration for `Connection` instances in the pool
+    ///   - connectionFactory: the factory used to create new `Connections` in this pool
+    ///   - user: the Postgres user
+    ///   - credential: the credential to use to authenticate to the Postgres server
     ///   - connectionDelegate: an optional delegate for the `Connection` instances
     public init(connectionPoolConfiguration: ConnectionPoolConfiguration,
-                connectionConfiguration: ConnectionConfiguration,
+                connectionFactory: ConnectionFactory,
+                user: String,
+                credential: Credential,
                 connectionDelegate: ConnectionDelegate? = nil) {
         
         _connectionPoolConfiguration = connectionPoolConfiguration
-        self.connectionConfiguration = connectionConfiguration
+        self.connectionFactory = connectionFactory
+        self.user = user
+        self.credential = credential
         self.connectionDelegate = connectionDelegate
         
         computeMetrics(reset: true) // initialize the metrics
@@ -99,8 +105,14 @@ public class ConnectionPool {
         }
     }
     
-    /// The configuration of `Connection` instances in this `ConnectionPool`.
-    public let connectionConfiguration: ConnectionConfiguration
+    /// The factory used to create new connections in this `ConnectionPool`.
+    public let connectionFactory: ConnectionFactory
+
+    /// The Postgres user.
+    public let user: String
+    
+    /// The credential to use to authenticate to the Postgres server.
+    public let credential: Credential
     
     /// An optional delegate for `Connection` instances in this `ConnectionPool`.
     public let connectionDelegate: ConnectionDelegate?
@@ -517,8 +529,11 @@ public class ConnectionPool {
         if pooledConnection == nil &&
             pooledConnections.count < _connectionPoolConfiguration.maximumConnections {
             
-            let connection = try Connection(configuration: connectionConfiguration,
-                                            delegate: connectionDelegate)
+            let connection = try ThrowingUnsafeTask {
+                try await self.connectionFactory.connect(user: self.user,
+                                                         credential: self.credential,
+                                                         delegate: self.connectionDelegate)
+            }.get()
             
             pooledConnection = PooledConnection(connection: connection)
             pooledConnections.insert(pooledConnection!)
@@ -551,7 +566,7 @@ public class ConnectionPool {
     }
     
     private func abruptlyCloseConnection(_ connection: Connection) {
-        async { // since closing a connection is blocking
+        async { // since closing a connection is blocking // FIXME: this is no longer true
             connection.closeAbruptly()
         }
     }
@@ -756,7 +771,7 @@ public class ConnectionPool {
     // MARK: Async
     //
     
-    private func async(_ operation: @escaping () -> Void) {
+    private func async(_ operation: @escaping () -> Void) { // FIXME: rename this function
         _connectionPoolConfiguration.dispatchQueue.async {
             operation()
         }

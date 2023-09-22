@@ -19,23 +19,23 @@
 
 internal class ErrorResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "E")
         
         var fields = [Character: String]()
         
-        while try responseBody.peekUInt8() != 0 {
-            let fieldType = try responseBody.readASCIICharacter()
-            let fieldValue = try responseBody.readUTF8String()
+        while try await responseBody.peekUInt8() != 0 {
+            let fieldType = try await responseBody.readASCIICharacter()
+            let fieldValue = try await responseBody.readUTF8String()
             fields[fieldType] = fieldValue
         }
         
-        try responseBody.readUInt8() // the terminal 0
+        try await responseBody.readUInt8() // the terminal 0
         
         notice = Notice(fields: fields)
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let notice: Notice

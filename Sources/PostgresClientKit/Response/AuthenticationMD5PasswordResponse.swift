@@ -19,13 +19,13 @@
 
 internal class AuthenticationMD5PasswordResponse: AuthenticationResponse {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "R")
         
-        salt = try responseBody.readUInt32()
+        salt = try await responseBody.readUInt32()
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let salt: UInt32

@@ -19,11 +19,11 @@
 
 internal class CloseCompleteResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "3")
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     

@@ -19,11 +19,11 @@
 
 internal class EmptyQueryResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "I")
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     

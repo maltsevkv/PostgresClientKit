@@ -19,15 +19,15 @@
 
 internal class NotificationResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "A")
         
-        processId = try responseBody.readUInt32()
-        channel = try responseBody.readUTF8String()
-        payload = try responseBody.readUTF8String()
+        processId = try await responseBody.readUInt32()
+        channel = try await responseBody.readUTF8String()
+        payload = try await responseBody.readUTF8String()
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let processId: UInt32

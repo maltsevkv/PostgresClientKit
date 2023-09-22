@@ -19,22 +19,22 @@
 
 internal class RowDescriptionResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "T")
         
-        let fieldCount = try responseBody.readUInt16()
+        let fieldCount = try await responseBody.readUInt16()
         var columns = [ColumnMetadata]()
         
         for _ in 0..<fieldCount {
             
-            let name = try responseBody.readUTF8String()
-            let tableOID = try responseBody.readUInt32()
-            let columnAttributeNumber = try responseBody.readUInt16()
-            let dataTypeOID = try responseBody.readUInt32()
-            let dataTypeSize = try responseBody.readUInt16()
-            let dataTypeModifier = try responseBody.readUInt32()
-            _ = try responseBody.readUInt16() // format code
+            let name = try await responseBody.readUTF8String()
+            let tableOID = try await responseBody.readUInt32()
+            let columnAttributeNumber = try await responseBody.readUInt16()
+            let dataTypeOID = try await responseBody.readUInt32()
+            let dataTypeSize = try await responseBody.readUInt16()
+            let dataTypeModifier = try await responseBody.readUInt32()
+            _ = try await responseBody.readUInt16() // format code
 
             let column = ColumnMetadata(name: name,
                                         tableOID: tableOID,
@@ -48,7 +48,7 @@ internal class RowDescriptionResponse: Response {
         
         self.columns = columns
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let columns: [ColumnMetadata]

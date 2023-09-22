@@ -23,7 +23,11 @@
 struct TestEnvironment {
     
     /// The hostname or IP address of the Postgres server.
-    let postgresHost = "127.0.0.1"
+    let postgresHost = "localhost"
+    
+    /// The SSL server name for the Server Name Indication (SNI) extension to SSL/TLS,
+    /// or nil to use the value of `postgresHost`.  Must not be an IP address.
+    let postgresSSLServerName: String? = nil
     
     /// The port number of the Postgres server.
     let postgresPort = 5432

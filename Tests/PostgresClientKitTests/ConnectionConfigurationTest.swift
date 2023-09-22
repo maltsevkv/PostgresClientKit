@@ -20,47 +20,8 @@
 import PostgresClientKit
 import XCTest
 
-/// Tests ConnectionConfiguration.
 class ConnectionConfigurationTest: PostgresClientKitTestCase {
-    
-    func test() {
-
-        var configuration = ConnectionConfiguration()
-        XCTAssertEqual(configuration.host, "localhost")
-        XCTAssertEqual(configuration.port, 5432)
-        XCTAssertEqual(configuration.ssl, true)
-        XCTAssertEqual(configuration.socketTimeout, 0)
-        XCTAssertEqual(configuration.database, "postgres")
-        XCTAssertEqual(configuration.user, "")
-        
-        if case .trust = configuration.credential { } else {
-            XCTFail("credential \(configuration.credential)")
-        }
-        
-        XCTAssertEqual(configuration.applicationName, "PostgresClientKit")
-
-        configuration.host = "postgres.example.com"
-        configuration.port = 54321
-        configuration.ssl = false
-        configuration.socketTimeout = 30
-        configuration.database = "example"
-        configuration.user = "bob.loblaw"
-        configuration.credential = .cleartextPassword(password: "welcome1")
-        configuration.applicationName = "ConnectionConfigurationTest"
-        
-        XCTAssertEqual(configuration.host, "postgres.example.com")
-        XCTAssertEqual(configuration.port, 54321)
-        XCTAssertEqual(configuration.ssl, false)
-        XCTAssertEqual(configuration.socketTimeout, 30)
-        XCTAssertEqual(configuration.database, "example")
-        XCTAssertEqual(configuration.user, "bob.loblaw")
-        
-        if case .cleartextPassword(password: "welcome1") = configuration.credential { } else {
-            XCTFail("credential \(configuration.credential)")
-        }
-        
-        XCTAssertEqual(configuration.applicationName, "ConnectionConfigurationTest")
-    }
+    // FIXME: Replace with ConnectionFactoryTest
 }
 
 // EOF

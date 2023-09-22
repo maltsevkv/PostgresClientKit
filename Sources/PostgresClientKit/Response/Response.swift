@@ -24,7 +24,7 @@ internal class Response: CustomStringConvertible {
     ///
     /// - Parameter responseBody: the response body
     /// - Throws: `PostgresError` is the operation fails
-    internal init(responseBody: Connection.ResponseBody) throws {
+    internal init(responseBody: Connection.ResponseBody) async throws {
         responseType = responseBody.responseType
         try responseBody.verifyFullyConsumed()
     }

@@ -23,14 +23,6 @@ import XCTest
 /// Tests RowDecoder.
 class RowDecoderTest: PostgresClientKitTestCase {
 
-    override func setUp() {
-        do {
-            try createWeatherTable()
-        } catch {
-            XCTFail(String(describing: error))
-        }
-    }
-    
     struct WeatherStruct: Decodable, Equatable {
         let date: PostgresDate
         let city: String
@@ -63,8 +55,10 @@ class RowDecoderTest: PostgresClientKitTestCase {
             lhs.prcp == rhs.prcp
         }
     }
-    
-    func testBasicOperation() {
+        
+    func testBasicOperation() async throws {
+        
+        try await createWeatherTable()
 
         let weatherExpectedResults = [
             WeatherStruct(date: PostgresDate("1994-11-27")!, city: "San Francisco", temp_lo: 46, temp_hi: 50, prcp: 0.25),
@@ -78,15 +72,15 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
         
         /// decodeByColumnName: basic scenario
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self),
             weatherExpectedResults)
 
         /// decodeByColumnName: fails if retrieveColumnMetadata is false
-        try XCTAssertThrowsError(
-            decodeByColumnName(
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self,
                 retrieveColumnMetadata: false))
@@ -97,50 +91,50 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
 
         /// decodeByColumnName: column order doesn't matter
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT city, temp_lo, temp_hi, prcp, date FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self),
             weatherExpectedResults)
 
         /// decodeByColumnName: extra columns are ignored
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT 'hello' x1, date, city, 314 x2, temp_lo, temp_hi, prcp FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self),
             weatherExpectedResults)
 
         /// decodeByColumnName: another basic scenario
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT 's1' string, 's2' optionalString;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: "s2")])
         
         /// decodeByColumnName: duplicate column names (last one wins)
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT 's1' string, 's2' optionalString, 's3' string;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s3", optionalString: "s2")])
         
         /// decodeByColumnName: column names are case-insensitive
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT 's1' \"STRING\", 's2' \"optionalSTRING\";",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: "s2")])
 
         /// decodeByColumnName: a missing column for an optional property is allowed
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT 's1' string;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: nil)])
 
         /// decodeByColumnName: fails if missing a column for a non-optional property
-        try XCTAssertThrowsError(
-            decodeByColumnName(
+        try await XCTAssertThrowsErrorAsync(
+            await decodeByColumnName(
                 sql: "SELECT 's2' optionalString;",
                 type: StringAndOptionalString.self))
         { error in
@@ -150,8 +144,8 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
         
         /// decodeByColumnName: fails if a non-optional property is NULL
-        try XCTAssertThrowsError(
-            decodeByColumnName(
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT NULL string;",
                 type: StringAndOptionalString.self))
         { error in
@@ -161,15 +155,15 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
         
         /// decodeByColumnIndex: basic scenario
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self),
             weatherExpectedResults)
         
         /// decodeByColumnIndex: column order does matter
-        try XCTAssertThrowsError(
-            decodeByColumnIndex(
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT city, temp_lo, temp_hi, prcp, date FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self))
         { error in
@@ -179,43 +173,43 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
 
         /// decodeByColumnIndex: extra columns are ignored (if at the end)
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT date, city, temp_lo, temp_hi, prcp, 'hello' x1 FROM weather ORDER BY date, city;",
                 type: WeatherStruct.self),
             weatherExpectedResults)
         
         /// decodeByColumnIndex: another basic scenario
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT 's1' string, 's2' optionalString;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: "s2")])
         
         /// decodeByColumnIndex: column names are ignored
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT 's1' optionalString, 's2' string;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: "s2")])
         
         /// decodeByColumnIndex: column names are ignored
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT 's1' foo, 's2' foo;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: "s2")])
         
         /// decodeByColumnIndex: a missing column for an optional property is allowed
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT 's1' string;",
                 type: StringAndOptionalString.self),
             [StringAndOptionalString(string: "s1", optionalString: nil)])
         
         /// decodeByColumnIndex: fails if missing a column for a non-optional property
-        try XCTAssertThrowsError(
-            decodeByColumnIndex(
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT;",
                 type: StringAndOptionalString.self))
         { error in
@@ -225,8 +219,8 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
         
         /// decodeByColumnIndex: fails if a non-optional property is NULL
-        try XCTAssertThrowsError(
-            decodeByColumnIndex(
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT NULL string;",
                 type: StringAndOptionalString.self))
         { error in
@@ -236,31 +230,33 @@ class RowDecoderTest: PostgresClientKitTestCase {
         }
     }
     
-    func testDecodableClass() {
-        
+    func testDecodableClass() async throws {
+
+        try await createWeatherTable()
+
         let weatherExpectedResults = [
             WeatherClass(date: PostgresDate("1994-11-27")!, city: "San Francisco", temp_lo: 46, temp_hi: 50, prcp: 0.25),
             WeatherClass(date: PostgresDate("1994-11-29")!, city: "Hayward", temp_lo: 37, temp_hi: 54, prcp: nil),
             WeatherClass(date: PostgresDate("1994-11-29")!, city: "San Francisco", temp_lo: 43, temp_hi: 57, prcp: 0)
         ]
-        
+
         /// decodeByColumnName: basic scenario
-        try XCTAssertEqual(
-            decodeByColumnName(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnName(
                 sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather ORDER BY date, city;",
                 type: WeatherClass.self),
             weatherExpectedResults)
 
         /// decodeByColumnIndex: basic scenario
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather ORDER BY date, city;",
                 type: WeatherClass.self),
             weatherExpectedResults)
     }
-    
-    func testStandardLibraryTypes() {
-        
+
+    func testStandardLibraryTypes() async throws {
+
         struct StandardLibraryTypes: Decodable, Equatable {
             let bool: Bool
             let string: String
@@ -277,9 +273,9 @@ class RowDecoderTest: PostgresClientKitTestCase {
             let uint32: UInt32
             let uint64: UInt64
         }
-        
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql:
                     """
                     SELECT
@@ -292,20 +288,20 @@ class RowDecoderTest: PostgresClientKitTestCase {
                 bool: true, string: "hello", double: 3.14, float: -3.14,
                 int: Int.min, int8: Int8.min, int16: Int16.min, int32: Int32.min, int64: Int64.min,
                 uint: UInt.max, uint8: UInt8.max, uint16: UInt16.max, uint32: UInt32.max, uint64: UInt64.max)])
-             
+
         struct Int8AndDouble: Decodable, Equatable {
             let int8: Int8?
             let double: Double?
         }
 
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT '123', '3.14';",
                 type: Int8AndDouble.self),
             [Int8AndDouble(int8: 123, double: 3.14)])
 
-        try XCTAssertThrowsError(
-            decodeByColumnIndex(
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT 123.4, NULL;",
                 type: Int8AndDouble.self))
         { error in
@@ -313,9 +309,9 @@ class RowDecoderTest: PostgresClientKitTestCase {
                 return XCTFail(String(describing: error))
             }
         }
-        
-        try XCTAssertThrowsError(
-            decodeByColumnIndex(
+
+        try await XCTAssertThrowsErrorAsync(
+            await self.decodeByColumnIndex(
                 sql: "SELECT NULL, '3point14';",
                 type: Int8AndDouble.self))
         { error in
@@ -324,9 +320,9 @@ class RowDecoderTest: PostgresClientKitTestCase {
             }
         }
     }
-    
-    func testPostgresClientKitTypes() {
-        
+
+    func testPostgresClientKitTypes() async throws {
+
         struct PostgresClientKitTypes: Decodable, Equatable {
             let postgresByteA: PostgresByteA
             let postgresTimestampWithTimeZone: PostgresTimestampWithTimeZone
@@ -335,9 +331,9 @@ class RowDecoderTest: PostgresClientKitTestCase {
             let postgresTime: PostgresTime
             let postgresTimeWithTimeZone: PostgresTimeWithTimeZone
         }
-        
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql:
                     """
                     SELECT
@@ -357,21 +353,21 @@ class RowDecoderTest: PostgresClientKitTestCase {
                 postgresTime: PostgresTime("16:25:19.365")!,
                 postgresTimeWithTimeZone: PostgresTimeWithTimeZone("16:25:19.365+00:00")!)])
     }
-    
-    func testFoundationDate() {
-                
+
+    func testFoundationDate() async throws {
+
         struct FoundationDate: Decodable, Equatable {
-            let dateFromTimestampWithTimeZone: Date
+                let dateFromTimestampWithTimeZone: Date
             let dateFromTimestamp: Date
             let dateFromDate: Date
             let dateFromTime: Date
             let dateFromTimeWithTimeZone: Date
         }
-        
+
         let utcTimeZone = TimeZone(secondsFromGMT: 0)!
 
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql:
                     """
                     SELECT
@@ -390,9 +386,9 @@ class RowDecoderTest: PostgresClientKitTestCase {
                 dateFromTimeWithTimeZone: PostgresTimeWithTimeZone("16:25:19.365+00:00")!.date)])
 
         let pstTimeZone = TimeZone(secondsFromGMT: -8 * 60 * 60)!
-        
-        try XCTAssertEqual(
-            decodeByColumnIndex(
+
+        try await XCTAssertEqualAsync(
+            await self.decodeByColumnIndex(
                 sql:
                     """
                     SELECT
@@ -411,60 +407,63 @@ class RowDecoderTest: PostgresClientKitTestCase {
                 dateFromTime: PostgresTime("16:25:19.365")!.date(in: pstTimeZone),
                 dateFromTimeWithTimeZone: PostgresTimeWithTimeZone("16:25:19.365-08:00")!.date)])
     }
-    
-    func testPerformance() {
+
+    func testPerformance() async {
+        
         do {
+            try await createWeatherTable()
+
             // INSERT 1000 days of random weather records for San Jose.
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            let connection = try await terryConnection()
             try connection.beginTransaction()
             let text = "INSERT INTO weather (date, city, temp_lo, temp_hi, prcp) VALUES ($1, $2, $3, $4, $5)"
             let statement = try connection.prepareStatement(text: text)
             var weatherHistory = [WeatherStruct]()
-            
+
             for i in 0..<1_000 {
-                
+
                 let tempLo = Int.random(in: 20...70)
                 let tempHi = Int.random(in: tempLo...100)
-                
+
                 let prcp: Double? = {
                     let r = Double.random(in: 0..<1)
                     if r < 0.1 { return nil }
                     if r < 0.8 { return 0.0 }
                     return Double(Int.random(in: 1...20)) / 10.0
                 }()
-                
+
                 let date: PostgresDate = {
                     let pgd = PostgresDate(year: 2000, month: 1, day: 1)!
                     var d = pgd.date(in: utcTimeZone)
                     d = enUsPosixUtcCalendar.date(byAdding: .day, value: i, to: d)!
                     return d.postgresDate(in: utcTimeZone)
                 }()
-                
+
                 let weather = WeatherStruct(
                     date: date, city: "San Jose", temp_lo: tempLo, temp_hi: tempHi, prcp: prcp)
-                
+
                 weatherHistory.append(weather)
-                
+
                 let cursor = try statement.execute(parameterValues:
                     [ weather.date, weather.city, weather.temp_lo, weather.temp_hi, weather.prcp ])
-                
+
                 XCTAssertEqual(cursor.rowCount, 1)
             }
-            
+
             try connection.commitTransaction()
 
             // SELECT the weather records and decode by name
             var selectedWeatherHistory = [WeatherStruct]()
-            try time("SELECT \(weatherHistory.count) rows and decode by name") {
-                selectedWeatherHistory = try decodeByColumnName(
+            try await time("SELECT \(weatherHistory.count) rows and decode by name") {
+                selectedWeatherHistory = try await decodeByColumnName(
                     sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather WHERE city = 'San Jose' ORDER BY date;",
                     type: WeatherStruct.self)
             }
             XCTAssertEqual(selectedWeatherHistory, weatherHistory)
 
             // SELECT the weather records and decode by index
-            try time("SELECT \(weatherHistory.count) rows and decode by index") {
-                selectedWeatherHistory = try decodeByColumnIndex(
+            try await time("SELECT \(weatherHistory.count) rows and decode by index") {
+                selectedWeatherHistory = try await decodeByColumnIndex(
                     sql: "SELECT date, city, temp_lo, temp_hi, prcp FROM weather WHERE city = 'San Jose' ORDER BY date;",
                     type: WeatherStruct.self)
             }
@@ -479,11 +478,14 @@ class RowDecoderTest: PostgresClientKitTestCase {
     // MARK: Helper functions
     //
     
-    func decodeByColumnName<T>(sql: String,
-                               type: T.Type,
-                               retrieveColumnMetadata: Bool = true,
-                               defaultTimeZone: TimeZone? = nil) throws -> [T] where T: Decodable {
-        let connection = try Connection(configuration: terryConnectionConfiguration())
+    func decodeByColumnName<T>(
+        sql: String,
+        type: T.Type,
+        retrieveColumnMetadata: Bool = true,
+        defaultTimeZone: TimeZone? = nil
+    ) async throws -> [T] where T: Decodable {
+        
+        let connection = try await terryConnection()
         let statement = try connection.prepareStatement(text: sql)
         let cursor = try statement.execute(retrieveColumnMetadata: retrieveColumnMetadata)
         var results = [T]()
@@ -495,11 +497,13 @@ class RowDecoderTest: PostgresClientKitTestCase {
         return results
     }
     
-    func decodeByColumnIndex<T>(sql: String,
-                                type: T.Type,
-                                defaultTimeZone: TimeZone? = nil) throws -> [T] where T: Decodable {
+    func decodeByColumnIndex<T>(
+        sql: String,
+        type: T.Type,
+        defaultTimeZone: TimeZone? = nil
+    ) async throws -> [T] where T: Decodable {
         
-        let connection = try Connection(configuration: terryConnectionConfiguration())
+        let connection = try await terryConnection()
         let statement = try connection.prepareStatement(text: sql)
         let cursor = try statement.execute(retrieveColumnMetadata: false)
         var results = [T]()
@@ -511,9 +515,9 @@ class RowDecoderTest: PostgresClientKitTestCase {
         return results
     }
     
-    func time(_ name: String, operation: () throws -> Void) throws {
+    func time(_ name: String, operation: () async throws -> Void) async throws {
         let start = Date()
-        try operation()
+        try await operation()
         let elapsed = Date().timeIntervalSince(start) * 1000
         Postgres.logger.info("\(name): elapsed time \(elapsed) ms")
     }

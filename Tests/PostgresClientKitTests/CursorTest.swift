@@ -23,11 +23,11 @@ import XCTest
 /// Tests Cursor.
 class CursorTest: PostgresClientKitTestCase {
     
-    func testCursorLifecycle() {
+    func testCursorLifecycle() async {
         do {
-            try createWeatherTable()
+            try await createWeatherTable()
             
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            let connection = try await terryConnection()
             let text = "SELECT * FROM weather"
             let statement = try connection.prepareStatement(text: text)
             
@@ -112,7 +112,7 @@ class CursorTest: PostgresClientKitTestCase {
             // Closing a connection closes any open cursor for that connection
             let cursor4 = try connection.prepareStatement(text: text).execute()
             XCTAssertFalse(cursor4.isClosed)
-            connection.close()
+            await connection.close()
             XCTAssertTrue(cursor4.isClosed)
             
             // next() throws if connection closed

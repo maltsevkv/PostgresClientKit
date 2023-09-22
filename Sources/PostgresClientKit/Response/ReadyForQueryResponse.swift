@@ -19,13 +19,13 @@
 
 internal class ReadyForQueryResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "Z")
         
-        transactionStatus = try responseBody.readASCIICharacter()
+        transactionStatus = try await responseBody.readASCIICharacter()
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let transactionStatus: Character

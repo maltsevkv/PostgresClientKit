@@ -19,21 +19,21 @@
 
 internal class AuthenticationSASLResponse: AuthenticationResponse {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "R")
         
         var mechanisms = [String]()
         
-        while try responseBody.peekUInt8() != 0 {
-            try mechanisms.append(responseBody.readUTF8String())
+        while try await responseBody.peekUInt8() != 0 {
+            try await mechanisms.append(responseBody.readUTF8String())
         }
         
-        try responseBody.readUInt8() // discard terminator
+        try await responseBody.readUInt8() // discard terminator
         
         self.mechanisms = mechanisms
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let mechanisms: [String]

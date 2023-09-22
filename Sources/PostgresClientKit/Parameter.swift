@@ -73,7 +73,7 @@ internal struct Parameter {
     /// - Throws: `PostgresError.invalidParameterValue` if the parameter does not have an allowed
     ///     value
     internal static func checkParameterStatusResponse(_ response: ParameterStatusResponse,
-                                                      connection: Connection) throws {
+                                                      connection: Connection) async throws {
         
         if let parameter = values.first(where: {
             $0.name == response.name
@@ -88,7 +88,7 @@ internal struct Parameter {
                     "\(response.value) (allowedValues \(allowedValues)); closing connection")
             
             // The invalid parameter change already ocurred.  This connection is toast.
-            connection.close()
+            await connection.close()
             
             throw PostgresError.invalidParameterValue(name: response.name,
                                                       value: response.value,

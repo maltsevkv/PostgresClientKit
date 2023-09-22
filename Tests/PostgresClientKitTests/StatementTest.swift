@@ -23,21 +23,21 @@ import XCTest
 /// Tests Statement.
 class StatementTest: PostgresClientKitTestCase {
     
-    func testPrepareStatement() {
+    func testPrepareStatement() async {
         
         do {
-            try createWeatherTable()
+            try await createWeatherTable()
             
             // Success case
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 _ = try connection.prepareStatement(text: text)
             }
             
             // Throws if invalid SQL text
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "invalid-text"
                 let operation = { try connection.prepareStatement(text: text) }
                 
@@ -50,8 +50,8 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Throws if connection closed
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
-                connection.close()
+                let connection = try await terryConnection()
+                await connection.close()
                 let text = "SELECT * FROM weather"
                 let operation = { try connection.prepareStatement(text: text) }
                 
@@ -64,7 +64,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Closes an open, undrained cursor
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement1 = try connection.prepareStatement(text: text)
                 let cursor1 = try statement1.execute()
@@ -78,7 +78,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Closes an open, drained cursor
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement1 = try connection.prepareStatement(text: text)
                 let cursor1 = try statement1.execute()
@@ -96,11 +96,11 @@ class StatementTest: PostgresClientKitTestCase {
         }
     }
     
-    func testStatementLifecycle() {
+    func testStatementLifecycle() async {
         do {
-            try createWeatherTable()
+            try await createWeatherTable()
             
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            let connection = try await terryConnection()
             let text = "SELECT * FROM weather"
             let statement1 = try connection.prepareStatement(text: text)
             let statement2 = try connection.prepareStatement(text: text)
@@ -132,7 +132,7 @@ class StatementTest: PostgresClientKitTestCase {
             XCTAssertFalse(statement2.isClosed)
             
             // Closing a connection closes its statements
-            connection.close()
+            await connection.close()
             XCTAssertTrue(statement1.isClosed)
             XCTAssertTrue(statement2.isClosed)
         } catch {
@@ -140,13 +140,13 @@ class StatementTest: PostgresClientKitTestCase {
         }
     }
     
-    func testExecuteStatement() {
+    func testExecuteStatement() async {
         do {
-            try createWeatherTable()
+            try await createWeatherTable()
             
             // Success case without parameters
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement = try connection.prepareStatement(text: text)
                 _ = try statement.execute()
@@ -154,7 +154,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Success case with with parameters
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather WHERE date = $1"
                 let statement = try connection.prepareStatement(text: text)
                 _ = try statement.execute(parameterValues: [ "1994-12-29" ])
@@ -162,7 +162,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Throws if parameters invalid
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather WHERE date = $1"
                 let statement = try connection.prepareStatement(text: text)
                 let operation = { try statement.execute(parameterValues: [ "invalid-date" ]) }
@@ -175,10 +175,10 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Throws if connection closed
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement = try connection.prepareStatement(text: text)
-                connection.close()
+                await connection.close()
                 let operation = { try statement.execute() }
                 
                 XCTAssertThrowsError(try operation()) { error in
@@ -190,7 +190,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Throws if statement closed
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement = try connection.prepareStatement(text: text)
                 statement.close()
@@ -205,7 +205,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Closes an open, undrained cursor
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement1 = try connection.prepareStatement(text: text)
                 let statement2 = try connection.prepareStatement(text: text)
@@ -222,7 +222,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Closes an open, drained cursor
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT * FROM weather"
                 let statement1 = try connection.prepareStatement(text: text)
                 let statement2 = try connection.prepareStatement(text: text)
@@ -241,7 +241,7 @@ class StatementTest: PostgresClientKitTestCase {
             
             // Repeated execution of same statement
             do {
-                let connection = try Connection(configuration: terryConnectionConfiguration())
+                let connection = try await terryConnection()
                 let text = "SELECT COUNT(*) FROM weather WHERE date = $1"
                 let statement = try connection.prepareStatement(text: text)
                 

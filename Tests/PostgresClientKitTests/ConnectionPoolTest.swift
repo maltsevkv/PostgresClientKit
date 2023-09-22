@@ -23,7 +23,7 @@ import XCTest
 /// Tests ConnectionPool.
 class ConnectionPoolTest: PostgresClientKitTestCase {
     
-    func test() {
+    func test() async {
         
         //
         // Initializer, public properties
@@ -33,16 +33,17 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
             class Delegate: ConnectionDelegate { }
             
             let connectionPoolConfiguration = ConnectionPoolConfiguration()
-            let connectionConfiguration = terryConnectionConfiguration()
             let connectionDelegate = Delegate()
             
             let connectionPool = ConnectionPool(
                 connectionPoolConfiguration: connectionPoolConfiguration,
-                connectionConfiguration: connectionConfiguration,
+                connectionFactory: Self.encryptedConnectionFactory,
+                user: TestEnvironment.current.terryUsername,
+                credential: .trust,
                 connectionDelegate: connectionDelegate)
             
             XCTAssertEqual(connectionPool.connectionPoolConfiguration, connectionPoolConfiguration)
-            XCTAssertEqual(connectionPool.connectionConfiguration, connectionConfiguration)
+// FIXME            XCTAssertEqual(connectionPool.connectionConfiguration, connectionConfiguration)
             XCTAssertTrue(connectionPool.connectionDelegate === connectionDelegate)
 
             connectionPool.checkMetrics(successfulRequests: 0,
@@ -57,23 +58,23 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                                         allocatedConnectionsClosedByRequestor: 0,
                                         allocatedConnectionsTimedOut: 0)
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertTrue(connection.delegate === connectionDelegate)
         }
-        
+
         
         //
         // Mutation of connectionPoolConfiguration
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             XCTAssertEqual(connectionPool.connectionPoolConfiguration.metricsLoggingInterval, 3600)
             
             connectionPool.connectionPoolConfiguration.metricsLoggingInterval = nil
             XCTAssertNil(connectionPool.connectionPoolConfiguration.metricsLoggingInterval)
             
-            acquireConnections(connectionPool: connectionPool, count: 3)
+            await acquireConnections(connectionPool: connectionPool, count: 3)
             
             connectionPool.checkMetrics(successfulRequests: 3,
                                         unsuccessfulRequestsTooBusy: 0,
@@ -91,7 +92,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
             XCTAssertEqual(connectionPool.connectionPoolConfiguration.metricsLoggingInterval, 1)
             
             // Wait for the metrics be logged (and reset!).
-            Thread.sleep(forTimeInterval: 1.1)
+            try await Task.sleep(for: .seconds(1.1))
             
             // Check that the reset took place.
             connectionPool.checkMetrics(successfulRequests: 0,
@@ -112,7 +113,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: success
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             let expectation = expect("acquireConnection: success")
             
@@ -121,13 +122,13 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                     let connection = try result.get()
                     connectionPool.releaseConnection(connection)
                 } catch {
-                    XCTFail("\(error)")
+                    XCTFail(String(describing: error))
                 }
                 
                 expectation.fulfill()
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             connectionPool.checkMetrics(successfulRequests: 1,
                                         unsuccessfulRequestsTooBusy: 0,
@@ -147,7 +148,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: connection pool closed
         //
 
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.close()
             
@@ -161,7 +162,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 expectation.fulfill()
             }
 
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             connectionPool.checkMetrics(successfulRequests: 0,
                                         unsuccessfulRequestsTooBusy: 0,
@@ -181,10 +182,10 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: too many pending requests
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.connectionPoolConfiguration.maximumConnections = 5
-            acquireConnections(connectionPool: connectionPool, count: 5)
+            await acquireConnections(connectionPool: connectionPool, count: 5)
             
             connectionPool.connectionPoolConfiguration.maximumPendingRequests = 2
             requestConnections(connectionPool: connectionPool, count: 2)
@@ -199,7 +200,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 expectation.fulfill()
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             connectionPool.checkMetrics(successfulRequests: 5,
                                         unsuccessfulRequestsTooBusy: 1,
@@ -219,10 +220,10 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: request timed out
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.connectionPoolConfiguration.maximumConnections = 5
-            acquireConnections(connectionPool: connectionPool, count: 5)
+            await acquireConnections(connectionPool: connectionPool, count: 5)
             
             connectionPool.connectionPoolConfiguration.pendingRequestTimeout = 1
             
@@ -236,7 +237,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 expectation.fulfill()
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             connectionPool.checkMetrics(successfulRequests: 5,
                                         unsuccessfulRequestsTooBusy: 0,
@@ -256,9 +257,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: error
         //
         
-        let badConnectionConfiguration = ConnectionConfiguration() // user not set
-        
-        withConnectionPool(connectionConfiguration: badConnectionConfiguration) { connectionPool in
+        await withConnectionPool(user: "") { connectionPool in
             
             let expectation = expect("acquireConnection: error")
             
@@ -270,7 +269,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 expectation.fulfill()
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             connectionPool.checkMetrics(successfulRequests: 0,
                                         unsuccessfulRequestsTooBusy: 0,
@@ -290,10 +289,10 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: requests serviced in FIFO order
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.connectionPoolConfiguration.maximumConnections = 5
-            var connections = acquireConnections(connectionPool: connectionPool, count: 5)
+            var connections = await acquireConnections(connectionPool: connectionPool, count: 5)
             
             var status = [String]()
             
@@ -305,7 +304,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                     _ = try result.get()
                     status.append("acquired connection for request A")
                 } catch {
-                    XCTFail("\(error)")
+                    XCTFail(String(describing: error))
                 }
                 
                 expectationA.fulfill()
@@ -319,23 +318,23 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                     _ = try result.get()
                     status.append("acquired connection for request B")
                 } catch {
-                    XCTFail("\(error)")
+                    XCTFail(String(describing: error))
                 }
                 
                 expectationB.fulfill()
             }
             
             XCTAssertTrue(status.isEmpty)
-            
+
             // Release a connection allowing request A to be fulfilled
             connectionPool.releaseConnection(connections.removeFirst())
-            wait(for: [ expectationA ], timeout: 1.0)
+            await fulfillment(of: [ expectationA ], timeout: 1.0)
             
             XCTAssertEqual(status, [ "acquired connection for request A" ])
             
             // Release a connection allowing request B to be fulfilled
             connectionPool.releaseConnection(connections.removeFirst())
-            wait(for: [ expectationB ], timeout: 1.0)
+            await fulfillment(of: [ expectationB ], timeout: 1.0)
             
             XCTAssertEqual(status, [ "acquired connection for request A",
                                      "acquired connection for request B"])
@@ -358,16 +357,16 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // acquireConnection: connections allocated in LRU order
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.connectionPoolConfiguration.maximumConnections = 5
-            let connections = acquireConnections(connectionPool: connectionPool, count: 5)
+            let connections = await acquireConnections(connectionPool: connectionPool, count: 5)
             
             for connection in connections.reversed() {
                 connectionPool.releaseConnection(connection)
             }
             
-            let moreConnections = acquireConnections(connectionPool: connectionPool, count: 5)
+            let moreConnections = await acquireConnections(connectionPool: connectionPool, count: 5)
             
             XCTAssertEqual(connections.reversed().map { $0.id },
                            moreConnections.map { $0.id })
@@ -390,13 +389,13 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: success
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertFalse(connection.isClosed)
 
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -417,19 +416,19 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: not in pool
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             let connection: Connection
                 
             do {
-                connection = try Connection(configuration: terryConnectionConfiguration())
+                connection = try await terryConnection()
                 XCTAssertFalse(connection.isClosed)
                 
                 connectionPool.releaseConnection(connection) // should log a warning
-                Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+                try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
                 XCTAssertTrue(connection.isClosed)
             } catch {
-                return XCTFail("\(error)")
+                return XCTFail(String(describing: error))
             }
             
             connectionPool.checkMetrics(successfulRequests: 0,
@@ -450,17 +449,17 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: pool non-forcibly closed
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.close(force: false)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
 
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -481,17 +480,17 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: pool forcibly closed
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.close(force: true)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
             
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
 
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -512,18 +511,18 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: allocation timed out
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.connectionPoolConfiguration.allocatedConnectionTimeout = 1
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
 
-            Thread.sleep(forTimeInterval: 1.1)
+            try await Task.sleep(for: .seconds(1.1))
             XCTAssertTrue(connection.isClosed)
 
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
             
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -544,17 +543,17 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: already released
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertFalse(connection.isClosed)
 
             connectionPool.releaseConnection(connection) // should log a warning
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
             
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -575,16 +574,16 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: already closed by requestor
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
-            connection.close()
+            await connection.close()
             XCTAssertTrue(connection.isClosed)
 
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
             
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -605,20 +604,20 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: explicit transaction was committed
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             do {
                 try connection.beginTransaction()
                 try connection.commitTransaction()
             } catch {
-                XCTFail("\(error)")
+                XCTFail(String(describing: error))
             }
             
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -639,20 +638,20 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: explicit transaction was rolled back
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             do {
                 try connection.beginTransaction()
                 try connection.rollbackTransaction()
             } catch {
-                XCTFail("\(error)")
+                XCTFail(String(describing: error))
             }
             
             connectionPool.releaseConnection(connection)
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertFalse(connection.isClosed)
             
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -673,19 +672,19 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // releaseConnection: explicit transaction was not committed or rolled back
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connection = acquireConnections(connectionPool: connectionPool, count: 1).first!
+            let connection = await acquireConnections(connectionPool: connectionPool, count: 1).first!
             XCTAssertFalse(connection.isClosed)
             
             do {
                 try connection.beginTransaction()
             } catch {
-                XCTFail("\(error)")
+                XCTFail(String(describing: error))
             }
             
             connectionPool.releaseConnection(connection) // should log a warning
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             XCTAssertTrue(connection.isClosed)
             
             connectionPool.checkMetrics(successfulRequests: 1,
@@ -706,7 +705,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // withConnection: success
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             let expectation = expect("withConnection: success")
             
@@ -714,16 +713,16 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 do {
                     _ = try result.get()
                 } catch {
-                    XCTFail("\(error)")
+                    XCTFail(String(describing: error))
                 }
                 
                 expectation.fulfill()
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             // Check that the above connection was released.
-            acquireConnections(connectionPool: connectionPool, count: 1) // should reuse that connection
+            await acquireConnections(connectionPool: connectionPool, count: 1) // should reuse that connection
             
             connectionPool.checkMetrics(successfulRequests: 2,
                                         unsuccessfulRequestsTooBusy: 0,
@@ -742,10 +741,10 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // withConnection: failure
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
             connectionPool.connectionPoolConfiguration.maximumConnections = 5
-            acquireConnections(connectionPool: connectionPool, count: 5)
+            await acquireConnections(connectionPool: connectionPool, count: 5)
             
             connectionPool.connectionPoolConfiguration.maximumPendingRequests = 2
             requestConnections(connectionPool: connectionPool, count: 2)
@@ -760,7 +759,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 expectation.fulfill()
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
             
             connectionPool.checkMetrics(successfulRequests: 5,
                                         unsuccessfulRequestsTooBusy: 1,
@@ -780,9 +779,9 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // close(force: false)
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connections = acquireConnections(connectionPool: connectionPool, count: 5)
+            let connections = await acquireConnections(connectionPool: connectionPool, count: 5)
             
             XCTAssertFalse(connectionPool.isClosed)
             connectionPool.close(force: false)
@@ -802,12 +801,12 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                                         allocatedConnectionsClosedByRequestor: 0,
                                         allocatedConnectionsTimedOut: 0)
             
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             
             for connection in connections {
                 XCTAssertFalse(connection.isClosed)
                 connectionPool.releaseConnection(connection)
-                Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+                try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
                 XCTAssertTrue(connection.isClosed)
             }
             
@@ -830,9 +829,9 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
         // close(force: true)
         //
         
-        withConnectionPool { connectionPool in
+        await withConnectionPool { connectionPool in
             
-            let connections = acquireConnections(connectionPool: connectionPool, count: 5)
+            let connections = await acquireConnections(connectionPool: connectionPool, count: 5)
             
             XCTAssertFalse(connectionPool.isClosed)
             connectionPool.close(force: true)
@@ -852,7 +851,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                                         allocatedConnectionsClosedByRequestor: 0,
                                         allocatedConnectionsTimedOut: 0)
             
-            Thread.sleep(forTimeInterval: 0.1) // let any async socket close complete
+            try await Task.sleep(for: .seconds(0.1)) // let any async socket close complete
             
             for connection in connections {
                 XCTAssertTrue(connection.isClosed)
@@ -865,23 +864,29 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
     /// closes the connection pool.
     ///
     /// - Parameters:
-    ///   - connectionConfiguration: the `ConnectionConfiguration`, or `nil` for
-    ///         `terryConnectionConfiguration()`
+    ///   - user: the Postgres user, or nil for a default
+    ///   - credential: the credential to use to authenticate to the Postgres server, or nil for
+    ///         a default
     ///   - operation: the operation to perform
     func withConnectionPool(
-        connectionConfiguration: ConnectionConfiguration? = nil,
-        _ operation: (ConnectionPool) -> Void) {
+        user: String? = nil,
+        credential: Credential? = nil,
+        _ operation: (ConnectionPool) async throws -> Void) async {
         
-        let connectionPoolConfiguration = ConnectionPoolConfiguration()
-        let connectionConfiguration = connectionConfiguration ?? terryConnectionConfiguration()
-        
-        let connectionPool = ConnectionPool(
-            connectionPoolConfiguration: connectionPoolConfiguration,
-            connectionConfiguration: connectionConfiguration)
-        
-        operation(connectionPool)
-        
-        connectionPool.close(force: true)
+            do {
+                let connectionPoolConfiguration = ConnectionPoolConfiguration()
+                
+                let connectionPool = ConnectionPool(
+                    connectionPoolConfiguration: connectionPoolConfiguration,
+                    connectionFactory: Self.encryptedConnectionFactory,
+                    user: user ?? TestEnvironment.current.terryUsername,
+                    credential: credential ?? .trust)
+                
+                try await operation(connectionPool)
+                connectionPool.close(force: true)
+            } catch {
+                XCTFail(String(describing: error))
+            }
     }
     
     /// Acquires and returns the specified number of connections.
@@ -891,7 +896,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
     ///   - count: the number of connections to acquire
     /// - Returns: the connections
     @discardableResult func acquireConnections(connectionPool: ConnectionPool,
-                                               count: Int) -> [Connection] {
+                                               count: Int) async -> [Connection] {
         
         var connections = [Connection]()
         
@@ -908,7 +913,7 @@ class ConnectionPoolTest: PostgresClientKitTestCase {
                 }
             }
             
-            waitForExpectations()
+            await waitForExpectations([expectation])
         }
         
         assert(connections.count == count)
@@ -1012,36 +1017,6 @@ extension ConnectionPoolConfiguration: Equatable {
             lhs.dispatchQueue === rhs.dispatchQueue &&
             lhs.metricsLoggingInterval == rhs.metricsLoggingInterval &&
             lhs.metricsResetWhenLogged == rhs.metricsResetWhenLogged
-    }
-}
-
-extension ConnectionConfiguration: Equatable {
-    
-    public static func == (lhs: ConnectionConfiguration,
-                           rhs: ConnectionConfiguration) -> Bool {
-        
-        guard lhs.host == rhs.host &&
-            lhs.port == rhs.port &&
-            lhs.ssl == rhs.ssl &&
-            lhs.database == rhs.database &&
-            lhs.user == rhs.user else {
-                return false
-        }
-        
-        switch (lhs.credential, rhs.credential) {
-        case (.trust, .trust):
-            return true
-            
-        case let (.cleartextPassword(password: s1),
-                  .cleartextPassword(password: s2)) where s1 == s2:
-            return true
-            
-        case let (.md5Password(password: s1),
-                  .md5Password(password: s2)) where s1 == s2:
-            return true
-            
-        default: return false
-        }
     }
 }
 

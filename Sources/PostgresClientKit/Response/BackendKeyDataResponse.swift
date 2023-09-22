@@ -19,14 +19,14 @@
 
 internal class BackendKeyDataResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "K")
         
-        processID = try responseBody.readUInt32()
-        secretKey = try responseBody.readUInt32()
+        processID = try await responseBody.readUInt32()
+        secretKey = try await responseBody.readUInt32()
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let processID: UInt32

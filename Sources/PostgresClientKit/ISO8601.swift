@@ -615,7 +615,7 @@ internal class ISO8601 {
     //
 
     private static var timeZones = [Int : TimeZone]()
-    private static let timeZonesSemaphore = DispatchSemaphore(value: 1)
+    private static let timeZonesSemaphore = DispatchSemaphore(value: 1) // FIXME: replace with actor?
 
     private static func timeZoneFor(secondsFromGMT: Int) throws -> TimeZone {
 
@@ -646,7 +646,7 @@ internal class ISO8601 {
     //
 
     private static var calendars = [TimeZone : Calendar]()
-    private static let calendarsSemaphore = DispatchSemaphore(value: 1)
+    private static let calendarsSemaphore = DispatchSemaphore(value: 1) // FIXME: replace with actor?
 
     private static func calendarFor(timeZone: TimeZone) -> Calendar {
 
@@ -711,7 +711,7 @@ internal class ISO8601 {
     
     // For PostgresTimeWithTimeZone values, a different formatter is required for each time zone.
     private static var timeWithTimeZoneFormatters = [TimeZone : DateFormatter]()
-    private static let timeWithTimeZoneFormattersSemaphore = DispatchSemaphore(value: 1)
+    private static let timeWithTimeZoneFormattersSemaphore = DispatchSemaphore(value: 1) // FIXME: replace with actor?
 
     private static func timeWithTimeZoneFormatterFor(timeZone: TimeZone) -> DateFormatter {
 

@@ -23,7 +23,7 @@ import XCTest
 /// Tests ConnectionDelegate.
 class ConnectionDelegateTest: PostgresClientKitTestCase {
     
-    func test() {
+    func test() async {
         
         class Delegate: ConnectionDelegate {
             
@@ -59,8 +59,7 @@ class ConnectionDelegateTest: PostgresClientKitTestCase {
         
         do {
             let delegate = Delegate()
-            let configuration = terryConnectionConfiguration()
-            let connection = try Connection(configuration: configuration, delegate: delegate)
+            let connection = try await terryConnection(delegate: delegate)
             
             // didReceiveNotice
             var text = "SET client_min_messages = debug5"

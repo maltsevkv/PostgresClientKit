@@ -23,188 +23,242 @@ import XCTest
 /// Tests Connection.
 class ConnectionTest: PostgresClientKitTestCase {
     
-    func testCreateConnection() throws {
+    func testCreateConnection() async throws {
+        
+        let environment = TestEnvironment.current
         
         // Network error
-        var configuration = terryConnectionConfiguration()
-        configuration.host = "256.0.0.0"
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        var connectionFactory = try Self.createConnectionFactory()
+        connectionFactory.host = "256.0.0.0"
+        await XCTAssertThrowsErrorAsync(
+            try await connectionFactory.connect(
+                user: environment.terryUsername, credential: .trust)
+        ) { error in
             guard case PostgresError.socketError = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Non-SSL
-        configuration = terryConnectionConfiguration()
-        configuration.ssl = false
-        XCTAssertNoThrow(try Connection(configuration: configuration).close())
+        connectionFactory = try Self.createConnectionFactory()
+        connectionFactory.ssl = false
+        await XCTAssertNoThrowAsync(
+            try await connectionFactory.connect(
+                user: environment.terryUsername, credential: .trust
+            ).close())
         
         // SSL
-        configuration = terryConnectionConfiguration()
-        configuration.ssl = true // (the default)
-        XCTAssertNoThrow(try Connection(configuration: configuration).close())
+        connectionFactory = try Self.createConnectionFactory()
+        connectionFactory.ssl = true // (the default)
+        await XCTAssertNoThrowAsync(
+            try await connectionFactory.connect(
+                user: environment.terryUsername, credential: .trust
+            ).close())
 
         // Authenticate: trust required, trust supplied
-        configuration = terryConnectionConfiguration()
-        XCTAssertNoThrow(try Connection(configuration: configuration).close())
+        await XCTAssertNoThrowAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.terryUsername,
+                credential: .trust
+            ).close())
 
         // Authenticate: trust required, cleartextPassword supplied
-        configuration = terryConnectionConfiguration()
-        configuration.credential = .cleartextPassword(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.terryUsername,
+                credential: .cleartextPassword(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.trustCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Authenticate: trust required, md5Password supplied
-        configuration = terryConnectionConfiguration()
-        configuration.credential = .md5Password(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.terryUsername,
+                credential: .md5Password(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.trustCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
 
         // Authenticate: trust required, scramSHA256 supplied
-        configuration = terryConnectionConfiguration()
-        configuration.credential = .scramSHA256(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.terryUsername,
+                credential: .scramSHA256(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.trustCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
 
         // Authenticate: cleartextPassword required, trust supplied
-        configuration = charlieConnectionConfiguration()
-        configuration.credential = .trust
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.charlieUsername,
+                credential: .trust)
+        ) { error in
             guard case PostgresError.cleartextPasswordCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Authenticate: cleartextPassword required, cleartextPassword supplied
-        configuration = charlieConnectionConfiguration()
-        XCTAssertNoThrow(try Connection(configuration: configuration).close())
+        await XCTAssertNoThrowAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.charlieUsername,
+                credential: .cleartextPassword(password: environment.charliePassword)
+            ).close())
         
         // Authenticate: cleartextPassword required, cleartextPassword supplied, incorrect password
-        configuration = charlieConnectionConfiguration()
-        configuration.credential = .cleartextPassword(password: "wrong-password")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.charlieUsername,
+                credential: .cleartextPassword(password: "wrong-password"))
+        ) { error in
             guard case PostgresError.sqlError = error else {
                 return XCTFail(String(describing: error))
             }
         }
-
+        
         // Authenticate: cleartextPassword required, md5Password supplied
-        configuration = charlieConnectionConfiguration()
-        configuration.credential = .md5Password(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.charlieUsername,
+                credential: .md5Password(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.cleartextPasswordCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Authenticate: cleartextPassword required, scramSHA256 supplied
-        configuration = charlieConnectionConfiguration()
-        configuration.credential = .scramSHA256(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.charlieUsername,
+                credential: .scramSHA256(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.cleartextPasswordCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
-        
+
         // Authenticate: md5Password required, trust supplied
-        configuration = maryConnectionConfiguration()
-        configuration.credential = .trust
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.maryUsername,
+                credential: .trust)
+        ) { error in
             guard case PostgresError.md5PasswordCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
-
+        
         // Authenticate: md5Password required, cleartextPassword supplied
-        configuration = maryConnectionConfiguration()
-        configuration.credential = .cleartextPassword(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.maryUsername,
+                credential: .cleartextPassword(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.md5PasswordCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Authenticate: md5Password required, md5Password supplied
-        configuration = maryConnectionConfiguration()
-        XCTAssertNoThrow(try Connection(configuration: configuration).close())
+        await XCTAssertNoThrowAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.maryUsername,
+                credential: .md5Password(password: environment.maryPassword)
+            ).close())
         
         // Authenticate: md5Password required, md5Password supplied, incorrect password
-        configuration = maryConnectionConfiguration()
-        configuration.credential = .md5Password(password: "wrong-password")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.maryUsername,
+                credential: .md5Password(password: "wrong-password"))
+        ) { error in
             guard case PostgresError.sqlError = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Authenticate: md5Password required, scramSHA256 supplied
-        configuration = maryConnectionConfiguration()
-        configuration.credential = .scramSHA256(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.maryUsername,
+                credential: .scramSHA256(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.md5PasswordCredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
-
+        
         // Authenticate: scramSHA256 required, trust supplied
-        configuration = sallyConnectionConfiguration()
-        configuration.credential = .trust
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.sallyUsername,
+                credential: .trust)
+        ) { error in
             guard case PostgresError.scramSHA256CredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
-
+        
         // Authenticate: scramSHA256 required, cleartextPassword supplied
-        configuration = sallyConnectionConfiguration()
-        configuration.credential = .cleartextPassword(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.sallyUsername,
+                credential: .cleartextPassword(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.scramSHA256CredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
         
         // Authenticate: scramSHA256 required, md5Password supplied
-        configuration = sallyConnectionConfiguration()
-        configuration.credential = .md5Password(password: "wrong-credential-type")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.sallyUsername,
+                credential: .md5Password(password: "wrong-credential-type"))
+        ) { error in
             guard case PostgresError.scramSHA256CredentialRequired = error else {
                 return XCTFail(String(describing: error))
             }
         }
-        
-        // Authenticate: scramSHA256 required, scramSHA256 supplied
-        configuration = sallyConnectionConfiguration()
-        XCTAssertNoThrow(try Connection(configuration: configuration).close())
 
+        // Authenticate: scramSHA256 required, scramSHA256 supplied
+        await XCTAssertNoThrowAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.sallyUsername,
+                credential: .scramSHA256(password: environment.sallyPassword)
+            ).close())
+        
         // Authenticate: scramSHA256 required, scramSHA256 supplied, incorrect password
-        configuration = sallyConnectionConfiguration()
-        configuration.credential = .scramSHA256(password: "wrong-password")
-        XCTAssertThrowsError(try Connection(configuration: configuration)) { error in
+        await XCTAssertThrowsErrorAsync(
+            try await Self.encryptedConnectionFactory.connect(
+                user: environment.sallyUsername,
+                credential: .scramSHA256(password: "wrong-password"))
+        ) { error in
             guard case PostgresError.sqlError = error else {
                 return XCTFail(String(describing: error))
             }
         }
     }
     
-    func testApplicationName() {
+    func testApplicationName() async {
         
         do {
             let applicationName = "Test-\(Int.random(in: Int.min...Int.max))"
             
-            var configuration = terryConnectionConfiguration()
-            configuration.applicationName = applicationName 
+            let connectionFactory = try Self.createConnectionFactory()
+            connectionFactory.applicationName = applicationName
             
-            let connection = try Connection(configuration: configuration)
+            let connection = try await connectionFactory.connect(
+                user: TestEnvironment.current.terryUsername, credential: .trust)
             
             let text = "SELECT COUNT(*) FROM pg_stat_activity WHERE application_name = $1"
             let statement = try connection.prepareStatement(text: text)
@@ -217,13 +271,11 @@ class ConnectionTest: PostgresClientKitTestCase {
         }
     }
     
-    func testConnectionLifecycle() {
+    func testConnectionLifecycle() async {
         
         do {
-            let configuration = maryConnectionConfiguration()
-            
-            let connection1 = try Connection(configuration: configuration)
-            let connection2 = try Connection(configuration: configuration)
+            let connection1 = try await maryConnection()
+            let connection2 = try await maryConnection()
             
             // Each connection has a unique id
             XCTAssertNotEqual(connection1.id, connection2.id)
@@ -239,33 +291,33 @@ class ConnectionTest: PostgresClientKitTestCase {
             XCTAssertFalse(connection2.isClosed)
             
             // Connections can be independently closed
-            connection1.close()
+            await connection1.close()
             XCTAssertTrue(connection1.isClosed)
             XCTAssertFalse(connection2.isClosed)
             
             // close() is idempotent
-            connection1.close()
+            await connection1.close()
             XCTAssertTrue(connection1.isClosed)
             XCTAssertFalse(connection2.isClosed)
             
-            connection2.close()
+            await connection2.close()
             XCTAssertTrue(connection1.isClosed)
             XCTAssertTrue(connection2.isClosed)
             
             // closeAbruptly() forces the connection to close.
-            let connection3 = try Connection(configuration: configuration)
+            let connection3 = try await maryConnection()
             connection3.closeAbruptly()
             XCTAssertTrue(connection3.isClosed)
             connection3.closeAbruptly()
             XCTAssertTrue(connection3.isClosed)
-            connection3.close()
+            await connection3.close()
             XCTAssertTrue(connection3.isClosed)
         } catch {
             XCTFail(String(describing: error))
         }
     }
     
-    func testTransactions() {
+    func testTransactions() async {
         
         do {
             func countWeatherRows(_ connection: Connection) throws -> Int {
@@ -279,9 +331,9 @@ class ConnectionTest: PostgresClientKitTestCase {
                 return count
             }
             
-            func resetTestData(_ connection: Connection) throws {
+            func resetTestData(_ connection: Connection) async throws {
                 
-                try createWeatherTable()
+                try await createWeatherTable()
                 
                 let statement = try connection.prepareStatement(text: """
                     CREATE OR REPLACE FUNCTION testWeather(deleteCity VARCHAR, selectDate VARCHAR)
@@ -296,8 +348,8 @@ class ConnectionTest: PostgresClientKitTestCase {
                 try statement.execute()
             }
             
-            let performer = try Connection(configuration: terryConnectionConfiguration())
-            let observer = try Connection(configuration: terryConnectionConfiguration())
+            let performer = try await terryConnection()
+            let observer = try await terryConnection()
             
             
             //
@@ -307,7 +359,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             // If there are no rows in the result, the transaction is implicitly committed upon
             // successful completion of Statement.execute.
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 let text = "DELETE FROM weather"
                 let statement = try performer.prepareStatement(text: text)
@@ -320,7 +372,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             // If there are no rows in the result, the transaction is implicitly committed upon
             // successful completion of Statement.execute
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 let text = "SELECT * FROM testWeather($1, $2)"
                 let statement = try performer.prepareStatement(text: text)
@@ -336,7 +388,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             // If there are one or more rows in the result, the transaction is implicitly committed
             // after the final row has been retrieved
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 let text = "SELECT * FROM testWeather($1, $2)"
                 let statement = try performer.prepareStatement(text: text)
@@ -352,7 +404,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             // If there are one or more rows in the result, the transaction is also implicitly
             // committed when the cursor is closed
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 let text = "SELECT * FROM testWeather($1, $2)"
                 let statement = try performer.prepareStatement(text: text)
@@ -365,7 +417,7 @@ class ConnectionTest: PostgresClientKitTestCase {
 
             // If the statement fails, it is implicitly rolled back
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 let text = "SELECT * FROM testWeather($1, $2)"
                 let statement = try performer.prepareStatement(text: text)
@@ -419,7 +471,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             
             // beginTransaction() + commitTransaction()
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(performer), 3)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 try performer.beginTransaction()
@@ -439,7 +491,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             
             // beginTransaction() + rollbackTransaction()
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(performer), 3)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 try performer.beginTransaction()
@@ -459,7 +511,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             
             // Closing a connection rolls back any explicit transaction
             do {
-                try resetTestData(performer)
+                try await resetTestData(performer)
                 XCTAssertEqual(try countWeatherRows(performer), 3)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
                 try performer.beginTransaction()
@@ -472,7 +524,7 @@ class ConnectionTest: PostgresClientKitTestCase {
                 statement.close()
                 XCTAssertEqual(try countWeatherRows(performer), 0)
                 XCTAssertEqual(try countWeatherRows(observer), 3)
-                performer.close()
+                await performer.close()
                 XCTAssertEqual(try countWeatherRows(observer), 3)
             }
         } catch {
@@ -480,9 +532,9 @@ class ConnectionTest: PostgresClientKitTestCase {
         }
     }
     
-    func testErrorRecovery() {
+    func testErrorRecovery() async {
         do {
-            let connection = try Connection(configuration: terryConnectionConfiguration())
+            let connection = try await terryConnection()
             var text = "invalid-text"
 
             XCTAssertThrowsError(try connection.prepareStatement(text: text)) { error in
@@ -511,7 +563,7 @@ class ConnectionTest: PostgresClientKitTestCase {
             
             XCTAssertFalse(connection.isClosed)
 
-            connection.close()
+            await connection.close()
             XCTAssertTrue(connection.isClosed)
         } catch {
             XCTFail(String(describing: error))

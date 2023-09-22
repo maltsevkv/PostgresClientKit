@@ -19,13 +19,13 @@
 
 internal class AuthenticationSASLContinueResponse: AuthenticationResponse {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "R")
         
-        serverFirstMessage = try responseBody.readUTF8String(byteCount: responseBody.bytesRemaining)
+        serverFirstMessage = try await responseBody.readUTF8String(byteCount: responseBody.bytesRemaining)
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let serverFirstMessage: String

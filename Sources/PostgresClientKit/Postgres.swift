@@ -43,7 +43,7 @@ public struct Postgres {
         return id
     }
     
-    private static let nextIdSemaphore = DispatchSemaphore(value: 1)
+    private static let nextIdSemaphore = DispatchSemaphore(value: 1) // FIXME: replace with actor?
     private static var _nextId: UInt64 = 1
     
     

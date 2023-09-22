@@ -30,11 +30,10 @@ public enum Credential {
     case trust
     
     /// Authenticates by cleartext password.  Not recommended unless the connection is encrypted by
-    /// SSL/TLS (see `ConnectionConfiguration.ssl`).
+    /// SSL/TLS (see `ConnectionFactory.ssl`).
     case cleartextPassword(password: String)
     
-    /// Authenticates by MD5 hash of the username (`ConnectionConfiguration.user`), password, and
-    /// random salt.
+    /// Authenticates by MD5 hash of the Postgres username, password, and random salt.
     case md5Password(password: String)
     
     /// Authenticates using SCRAM-SHA-256 (RFC 7677).  This is the most secure authentication

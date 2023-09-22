@@ -57,7 +57,7 @@ public class Logger {
     public init() { }
     
     /// Used to make this logger instance threadsafe.
-    private let semaphore = DispatchSemaphore(value: 1)
+    private let semaphore = DispatchSemaphore(value: 1) // FIXME: replace with actor?
     
     /// The log level for this logger.  Defaults to `LogLevel.info`.
     public var level: LogLevel {

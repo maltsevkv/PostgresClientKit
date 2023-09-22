@@ -32,10 +32,10 @@ class ConnectionPoolStressTest: PostgresClientKitTestCase {
     // Time between requests, in seconds.
     let interRequestTime = { Double.random(in: 0.0005..<0.0015) }
 
-    func test() throws {
+    func test() async throws {
         guard performTest else { return }
         
-        try createWeatherTable()
+        try await createWeatherTable()
         
         var connectionPoolConfiguration = ConnectionPoolConfiguration()
         connectionPoolConfiguration.maximumConnections = 10
@@ -48,11 +48,13 @@ class ConnectionPoolStressTest: PostgresClientKitTestCase {
         
         let pool = ConnectionPool(
             connectionPoolConfiguration: connectionPoolConfiguration,
-            connectionConfiguration: terryConnectionConfiguration())
+            connectionFactory: Self.encryptedConnectionFactory,
+            user: TestEnvironment.current.terryUsername,
+            credential: .trust)
         
         for _ in 0..<requestCount {
             
-            Thread.sleep(forTimeInterval: interRequestTime())
+            try await Task.sleep(for: .seconds(interRequestTime()))
             
             pool.withConnection { result in
                 do {
@@ -79,7 +81,7 @@ class ConnectionPoolStressTest: PostgresClientKitTestCase {
         }
         
         Postgres.logger.info("<<< Submitted final request; stopping in 5 seconds >>>")
-        Thread.sleep(forTimeInterval: 5.0)
+        try await Task.sleep(for: .seconds(5))
         Postgres.logger.info("<<< \(pool.computeMetrics(reset: false)) >>>")
     }
 }

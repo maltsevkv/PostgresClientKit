@@ -19,13 +19,13 @@
 
 internal class CommandCompleteResponse: Response {
     
-    override internal init(responseBody: Connection.ResponseBody) throws {
+    override internal init(responseBody: Connection.ResponseBody) async throws {
         
         assert(responseBody.responseType == "C")
         
-        commandTag = try responseBody.readUTF8String()
+        commandTag = try await responseBody.readUTF8String()
         
-        try super.init(responseBody: responseBody)
+        try await super.init(responseBody: responseBody)
     }
     
     internal let commandTag: String
