@@ -46,7 +46,7 @@ public struct ConnectionConfiguration {
     ///
     /// Refer to the [BlueSSLService documentation](https://github.com/Kitura/BlueSSLService#creating-the-configuration)
     /// for additional information on how to initialize and configure the configuration.
-    public var sslServiceConfiguration = SSLService.Configuration()
+    public var sslServiceConfiguration = SSLService.Configuration.init(withChainFilePath: nil)
 
     /// The timeout for socket operations, in seconds, or 0 for no timeout.  Defaults to 0.
     public var socketTimeout = 0
